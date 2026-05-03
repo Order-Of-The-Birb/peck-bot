@@ -20,6 +20,13 @@ __reload_deps__ = ("utils.generic", "utils.time")
 
 sqb_member_last_seen = datetime.now(UTC)-timedelta(minutes=30)
 
+
+def _cooldown_expire_time(timeout_store, user_id: int) -> datetime | None:
+	oldest = timeout_store.getOldest(user_id)
+	if oldest is None:
+		return None
+	return oldest + timedelta(minutes=5)
+
 class Listeners(commands.Cog):
 	def __init__(self, bot:'Bot'):
 		self.bot = bot
@@ -120,7 +127,10 @@ class Listeners(commands.Cog):
 			subject_clips_links:list[discord.Attachment] = []
 			async for _message in subject.history(limit=None, oldest_first=True):
 				subject_clips_links.extend(_message.attachments)
-			if (expire_time := self.bot.timeouts["clip"].getExpireTime(message.author.id)) and self.bot.timeouts["clip"].isTimedOut(message.author.id):
+			if self.bot.clipTimeout.timed_out(message.author.id):
+				expire_time = _cooldown_expire_time(self.bot.clipTimeout, message.author.id)
+				if expire_time is None:
+					expire_time = datetime.now(UTC) + timedelta(minutes=5)
 				await message.reply(f"You are under cooldown. It will expire {timeUtil.discord_timestamp(expire_time, "R")}", delete_after=5)
 				return
 			else:
