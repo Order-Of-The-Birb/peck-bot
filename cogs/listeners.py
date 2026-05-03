@@ -1,6 +1,6 @@
 if __name__ == "__main__":
 	raise Exception("Start the program from the main process")
-import discord, logging, re, aiohttp, asyncio
+import discord, logging, asyncio
 from discord.ext import commands
 from datetime import datetime, timedelta, UTC
 from enum import IntEnum
@@ -127,8 +127,8 @@ class Listeners(commands.Cog):
 			subject_clips_links:list[discord.Attachment] = []
 			async for _message in subject.history(limit=None, oldest_first=True):
 				subject_clips_links.extend(_message.attachments)
-			if self.bot.clipTimeout.timed_out(message.author.id):
-				expire_time = _cooldown_expire_time(self.bot.clipTimeout, message.author.id)
+			if self.bot.timeouts["clip"].isTimedOut(message.author.id):
+				expire_time = _cooldown_expire_time(self.bot.timeouts["clip"], message.author.id)
 				if expire_time is None:
 					expire_time = datetime.now(UTC) + timedelta(minutes=5)
 				await message.reply(f"You are under cooldown. It will expire {timeUtil.discord_timestamp(expire_time, "R")}", delete_after=5)
@@ -146,51 +146,6 @@ class Listeners(commands.Cog):
 			await updoot_msg.add_reaction(self.bot.get_emoji(1277999470038220902))
 			await asyncio.sleep(0.2)
 			await updoot_msg.add_reaction(self.bot.get_emoji(1277999500262244362))
-		elif (match := re.match(r"peckbot[,:\s]+(.*)", message.content, flags=re.IGNORECASE)) is not None:
-			prompt:str = match.group(1)
-			if not prompt:
-				await message.reply(f"You need to provide a prompt if you want to ask Peckbot something.", delete_after=5)
-				return
-			if self.bot.timeouts["ai"].isTimedOut(message.author.id):
-				await message.reply(f"You are under cooldown. It will expire {timeUtil.discord_timestamp(self.bot.timeouts["ai"].getOldest(message.author.id)+timedelta(minutes=5), "R")}", delete_after=5)
-				return
-			else:
-				self.bot.timeouts["ai"].add(message.author.id)
-			async with aiohttp.ClientSession(base_url="http://127.0.0.1") as session:
-				try:
-					payload = {
-						"model": "gemma4",
-						"messages": [{"role": "user", "content": prompt}],
-						"temperature": 0.7,
-					}
-					async with session.post(
-						"/v1/chat/completions",
-						json=payload,
-						timeout=aiohttp.ClientTimeout(total=45),
-					) as response:
-						if response.status != 200:
-							err_text = (await response.text()).strip()
-							await message.reply(
-								f"Peckbot error {response.status}: {err_text[:200]}",
-								delete_after=5,
-							)
-							return
-						data = await response.json()
-				except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
-					self.logger.exception("Peckbot request failed")
-					await message.reply("Peckbot is unavailable right now.", delete_after=5)
-					return
-				reply_text = (
-					data.get("choices", [{}])[0]
-					.get("message", {})
-					.get("content", "")
-					.strip()
-				)
-				if not reply_text:
-					await message.reply("Peckbot returned an empty response.", delete_after=5)
-					return
-				for i in range(0, len(reply_text), 2000):
-					await message.reply(reply_text[i:i+2000], mention_author=False)
 		elif ("trevor" in message.content.lower()):
 			await message.channel.send("https://tenor.com/view/trevor-moment-discord-swag-meme-gif-20463477") 
 			self.trevortimes += 1
