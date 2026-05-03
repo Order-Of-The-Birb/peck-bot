@@ -1,5 +1,5 @@
 from enum import StrEnum
-from os import getenv
+from os import getenv, _exit
 from requests import get, post, patch
 from requests.exceptions import ConnectionError
 from datetime import date, datetime
@@ -34,14 +34,14 @@ class UserRepository(list["UserRepository.User"]):
 		def pull(self) -> bool:
 			r = get(self.__base_url+f"users/{self.gaijin_id}")
 			if not r.ok:
-				logger.error(f"Endpoint threw an error: {httperror(r)}")
+				logger.error(f"Endpoint threw an error: {r.status_code} ({httperror(r)})")
 				return False
 			self.__data:dict[str, int|str] = r.json()["data"]
 			return True
 		def push(self) -> bool:
 			r = get(self.__base_url+f"users/{self.gaijin_id}")
 			if not r.ok:
-				logger.error(f"An error occurred when getting the current data of user {self.gaijin_id} ({httperror(r)})")
+				logger.error(f"An error occurred when getting the current data of user {self.gaijin_id} returned {r.status_code} ({httperror(r)})")
 				return False
 			currentData:dict[str, int|str] = r.json()["data"]
 			editedValues:dict[str, str|int] = {}
@@ -52,19 +52,19 @@ class UserRepository(list["UserRepository.User"]):
 			del currentData
 			r = get(self.__base_url+f"users/{self.gaijin_id}/leave_info")
 			if not r.ok:
-				logger.error(f"Leave info returned {httperror(r)}")
+				logger.error(f"Leave info returned {r.status_code} ({httperror(r)})")
 				return False
 			if (None if self.leave_info is None else self.leave_info.value) != r.json()["data"]:
 				if self.leave_info is not None:
 					r = patch(self.__base_url+f"users/{self.gaijin_id}/leave_info", json={"type":self.leave_info.value, "token": self.__token})
 					if not r.ok:
-						logger.error(f"Failed to update the following member's leave info: {self.gaijin_id} ({httperror(r)})")
+						logger.error(f"Failed to update the following member's leave info: {self.gaijin_id} returned {r.status_code} ({httperror(r)})")
 						return False	
 			if editedValues:
 				editedValues["token"] = self.__token
 				r = patch(self.__base_url+f"users/{self.gaijin_id}", json=editedValues)
 				if not r.ok:
-					logger.error(f"Failed to update the following member: {self.gaijin_id} ({httperror(r)})")
+					logger.error(f"Failed to update the following member: {self.gaijin_id} returned {r.status_code} ({httperror(r)})")
 					return False
 			return True
 		#region Gaijin ID
@@ -150,21 +150,24 @@ class UserRepository(list["UserRepository.User"]):
 			connection_attempts = 2
 			while True:
 				try:
-					r = get(self.__base_url+f"users?page={i}", headers={"accepts": "application/json"})
+					r = get(self.__base_url+f"users?page={i}&per_page=100", headers={"accepts": "application/json"})
 					break
 				except ConnectionError:
-					logger.critical(f"Database API could not be reached. Retrying in {f"{connection_attempts//60} minutes" if connection_attempts > 60 else ""}{connection_attempts%60} seconds")
+					logger.warning(f"Database API could not be reached. Retrying in {f"{connection_attempts//60} minutes" if connection_attempts > 60 else ""}{connection_attempts%60} seconds")
 					sleep(connection_attempts)
-					connection_attempts = min(connection_attempts*2, 10*60)
+					connection_attempts = connection_attempts*2
+					if connection_attempts >= 10*60:
+						raise ConnectionRefusedError("Establishing connection to database timed out.")
 			if r.json()["data"] == []:
 				break
 			if not r.ok:
-				logger.error(f"Endpoint threw an error: {httperror(r)}")
+				logger.error(f"Endpoint threw an error: {r.status_code} ({httperror(r)})")
 				return
 			self.extend(self.User(self.__base_url, self.__api_token, **item) for item in r.json()["data"])
 			i += 1
 		logger.info("Refreshed user cache")
 	def add_user(self, gaijin_id:int, username:str, status:Status=Status.UNVERIFIED, discord_id:int|None=None, timezone:int|None=None, joindate:date|None=None, initiator:int|None=None):
+		if gaijin_id is None: raise ValueError("Invalid gaijin ID given: Cannot be `null`")
 		if gaijin_id in [i.gaijin_id for i in self]: return
 		r = get(self.__base_url+f"users/{gaijin_id}")
 		if r.status_code == 404:
@@ -183,9 +186,9 @@ class UserRepository(list["UserRepository.User"]):
 				}
 			)
 			if not r.ok:
-				raise ValueError(f"User '{username}' could not be added to the database ({httperror(r)}): {r.text}")
+				raise ValueError(f"User '{username}' could not be added to the database ({r.status_code}, {httperror(r)}): {r.text}")
 		elif not r.ok:
-			raise LookupError(f"Endpoint threw an error while querying {httperror(r)}")
+			raise LookupError(f"Endpoint threw an error while querying {r.status_code} ({httperror(r)})")
 		self.append(self.User(self.__base_url, self.__api_token, gaijin_id=gaijin_id, username=username, status=status, discord_id=discord_id, tz=timezone, joindate=joindate.strftime("%Y-%m-%d") if joindate is not None else None, initiator=initiator))
 	def getByGID(self, gaijin_id:int) -> User|None:
 		for user in self:

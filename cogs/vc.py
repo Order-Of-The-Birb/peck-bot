@@ -1,15 +1,22 @@
+if __name__ == "__main__":
+	raise Exception("Start the program from the main process")
 import discord, logging, re
 from discord.ext import commands
 from datetime import datetime, timedelta, UTC
 from typing import TYPE_CHECKING
-if __name__ == "__main__":
-	import sys, os
-	sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 if TYPE_CHECKING:
 	from utils.bot import Bot
-from utils.bot import debug_only
+# ChannelIDs, RoleIDs, CategoryIDs
+# owner_only, officer_only, members_only, debug_only
+from utils.bot import CategoryIDs
+#import utils.generic as genericUtil
+#import utils.time as timeUtil
+#import utils.wt as wtUtil
 
-class VcCog(commands.Cog):
+# "utils.generic", "utils.time", "utils.wt"
+__reload_deps__ = ()
+
+class VcCog(commands.GroupCog, group_name="squad"):
 	bot:'Bot'
 	def __init__(self, bot:'Bot'):
 		self.bot = bot
@@ -21,7 +28,7 @@ class VcCog(commands.Cog):
 			if len(self.bot.squadVC.channels)!=0:
 				self.logger.critical("Channels list is not empty")
 				return
-			category = next((i for i in bot.get_guild(self.bot.peckServer).categories if i.id == self.bot.squadVCCategID), None)
+			category = next((i for i in bot.get_guild(self.bot.peckServer).categories if i.id == self.bot.categoryIDs[CategoryIDs.SQUAD_VC]), None)
 			if category is None: raise ValueError("Could not find the squad VC category")
 			self.bot.squadVC.channels=[self.bot.squadVC.SquadVCData(i.id, datetime.now(UTC).timestamp(), None, datetime.now(UTC).timestamp()) 
 				for i in category.voice_channels 
@@ -29,9 +36,9 @@ class VcCog(commands.Cog):
 			]
 			self.logger.debug("VCInit over")
 		self.bot.runtime.create_task(vcInit())
-		self.logger.debug("Voice Chat Commands initialized")
+		self.logger.debug(f"{self.__class__.__name__} initialized")
 	
-	@discord.app_commands.command()
+	@discord.app_commands.command(name="create")
 	@discord.app_commands.guild_only()
 	@discord.app_commands.choices(size=[
 		discord.app_commands.Choice(name="4 users", value=4),
@@ -40,6 +47,7 @@ class VcCog(commands.Cog):
 		discord.app_commands.Choice(name="No limit", value=-1)
 	])
 	async def create_vc(self, interaction:discord.Interaction, size:int):
+		"""Creates a new squad VC with a set size (4,8 or 10). Will not create one if you already have one active"""
 		await interaction.response.defer(thinking=True)
 		_30min_ago = (datetime.now(UTC)-timedelta(minutes=self.bot.squadVC.checkDelay)).timestamp()
 		empty_voices = [i for i in interaction.guild.voice_channels if self.SQUADVC_RE.fullmatch(i.name) is not None and len(i.members)==0]
@@ -50,7 +58,7 @@ class VcCog(commands.Cog):
 			if channel.creator == interaction.user.id and channel.created >= _30min_ago:
 				await interaction.edit_original_response(content="You created a channel recently, chill out dude...")
 				return
-		category = next((category for category in self.bot.get_guild(self.bot.peckServer).categories if category.id == self.bot.squadVCCategID), None)
+		category = next((category for category in self.bot.get_guild(self.bot.peckServer).categories if category.id == self.bot.categoryIDs[CategoryIDs.SQUAD_VC]), None)
 		if category is None: raise ValueError("Category not found... Does the server still exist?")
 		squad_voice_channels = [i for i in interaction.guild.voice_channels if self.SQUADVC_RE.fullmatch(i.name) is not None and i in category.voice_channels]
 		squad_numbers = sorted([int(i.name.split()[-1]) for i in squad_voice_channels], reverse=True)
@@ -67,7 +75,8 @@ class VcCog(commands.Cog):
 		new_ch = await interaction.guild.create_voice_channel(name=f"Squad {lowest}", reason=f"Command, ran by {interaction.user.name}({interaction.user.id})",position=num,user_limit=size, category=category)
 		await interaction.edit_original_response(content=f"Channel created, {new_ch.mention}")
 		self.bot.squadVC.channels.append(self.bot.squadVC.SquadVCData(new_ch.id, last_seen_person_time=datetime.now(UTC).timestamp(), creator=interaction.user.id, created=datetime.now(UTC).timestamp()))
-	@discord.app_commands.command()
+
+	@discord.app_commands.command(name="delete")
 	@discord.app_commands.guild_only()
 	@discord.app_commands.describe(channel="The squad channel number")
 	async def delete_vc(self, interaction:discord.Interaction, channel:int):

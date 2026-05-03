@@ -56,6 +56,9 @@ def main():
 	)
 	async def on_load():
 		logger.info("Bot is getting ready...")
+		bot.status = discord.Status.do_not_disturb
+		bot.timeouts["ai"].run()
+		bot.timeouts["clip"].run()
 		bot.newsAPI=NewsAPI(bot)
 		for extension in EXTENSIONS:
 			try:
@@ -68,6 +71,7 @@ def main():
 			logger.info(f"Synced {len(synced)} command(s)")
 		except Exception:
 			logging.exception("An error occured while syncing")
+		logger.info("Startup complete")
 	bot.setup_hook = on_load
 	token = getenv("bot_token")
 	if token is None:

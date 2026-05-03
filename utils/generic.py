@@ -1,5 +1,4 @@
 import requests, aiohttp, random, asyncio, discord, logging, tempfile, re, subprocess
-from difflib import get_close_matches
 from typing import TYPE_CHECKING, Protocol
 from os import path
 from json import loads
@@ -35,6 +34,7 @@ class genericButtons(discord.ui.View):
 			if self.requiredPerms is not None and not all(getattr(interaction.user.guild_permissions, p[0], False) for p in self.requiredPerms if p[1]):
 				self._logger.warning(f"Accept attempt by: {interaction.user.name} ({interaction.user.id})")
 				await interaction.followup.send("You do not have the required permission to use this!", ephemeral=True)
+				return
 			result = await acceptFunc(interaction, **kwargs)
 			if result:
 				yes.disabled = True
@@ -47,6 +47,7 @@ class genericButtons(discord.ui.View):
 			if self.requiredPerms is not None and not all(getattr(interaction.user.guild_permissions, p[0], False) for p in self.requiredPerms if p[1]):
 				self._logger.warning(f"Deny attempt by: {interaction.user.name} ({interaction.user.id})")
 				await interaction.followup.send("You do not have the required permission to use this!", ephemeral=True)
+				return
 			result = await denyFunc(interaction, **kwargs)
 			if result:
 				yes.disabled = True
@@ -59,36 +60,10 @@ class genericButtons(discord.ui.View):
 		if deny and denyFunc is not None:
 			self.add_item(no)
 
-def httperror(response:requests.Response|aiohttp.ClientResponse) -> tuple[int, str]:
+def httperror(response:requests.Response|aiohttp.ClientResponse) -> str:
 	if isinstance(response, aiohttp.ClientResponse):
-		return response.status, requests.status_codes._codes[response.status][0]
-	return response.status_code, requests.status_codes._codes[response.status_code][0]
-async def random_propaganda(bot:'Bot') -> str:
-	"""Selects a random propaganda post and returns with it"""
-	propaganda_ch = bot.get_channel(bot.propagandaChID)
-	messages = []
-	async for i in propaganda_ch.history():
-		if i.attachments:
-			for attachment in i.attachments:
-				messages.append(attachment.url)
-	return messages[random.randint(0, len(messages)-1)]
-def convert_str_int(data:str) -> str|int:
-	try:
-		return int(data)
-	except ValueError:
-		return data
-def get_closest_match(word: str, possibilities: list[str], n:int=1, cutoff:float=1) -> str:
-	if closest_matches := get_close_matches(word, possibilities, n, cutoff): return closest_matches[0]
-	for i in range(len(word), 1, -1):
-		for possibility in possibilities:
-			if possibility.lower().startswith(word[:i].lower()):
-				return possibility
-async def updooter(bot:'Bot', message:discord.Message|discord.MessageReference):
-	if isinstance(message, discord.MessageReference):
-		message = await bot.get_channel(message.channel_id).fetch_message(message.message_id)
-	await message.add_reaction(bot.get_emoji(1277999470038220902))
-	await asyncio.sleep(0.2)
-	await message.add_reaction(bot.get_emoji(1277999500262244362))
+		return requests.status_codes._codes[response.status][0]
+	return requests.status_codes._codes[response.status_code][0]
 async def convertImageToGif(image:discord.Attachment) -> discord.File:
 	allowed_types = ["png", "jpg", "jpeg", "webp"]
 	file_extension = image.filename.split(".")[-1].lower()
@@ -129,56 +104,55 @@ async def medalDownload(share_url:str) -> discord.File:
 	async with aiohttp.ClientSession() as session:
 		async with session.get(share_url) as response:
 			if response.status != 200: 
-				err = httperror(response)
-				raise LookupError(f"Medal website returned {err[0]} ({err[1]})")
+				raise LookupError(f"Medal website returned {response.status} ({httperror(response)})")
 			html = await response.text()
-	file_url = None
-	if '"contentUrl":"' in html:
-		file_url = html.split('"contentUrl":"')[1].split('","')[0]
-	if not file_url: 
-		raise LookupError("Could not find download URL in website")
-	with tempfile.TemporaryDirectory() as tmpdir:
-		input_path = path.join(tmpdir, "input.mp4")
-		output_path = path.join(tmpdir, "output.mp4")
-		async with session.get(file_url) as r:
-			with open(input_path, "wb") as f:
-				async for chunk in r.content.iter_chunked(1024 * 1024):
-					f.write(chunk)
-		# Get duration using ffprobe
-		probe = subprocess.run(
-			[
-				"ffprobe",
-				"-v", "error",
-				"-select_streams", "v:0",
-				"-show_entries", "format=duration",
-				"-of", "json",
-				input_path
-			],
-			capture_output=True,
-			text=True
-		)
+		file_url = None
+		if '"contentUrl":"' in html:
+			file_url = html.split('"contentUrl":"')[1].split('","')[0]
+		if not file_url: 
+			raise LookupError("Could not find download URL in website")
+		with tempfile.TemporaryDirectory() as tmpdir:
+			input_path = path.join(tmpdir, "input.mp4")
+			output_path = path.join(tmpdir, "output.mp4")
+			async with session.get(file_url) as r:
+				with open(input_path, "wb") as f:
+					async for chunk in r.content.iter_chunked(1024 * 1024):
+						f.write(chunk)
+			# Get duration using ffprobe
+			probe = subprocess.run(
+				[
+					"ffprobe",
+					"-v", "error",
+					"-select_streams", "v:0",
+					"-show_entries", "format=duration",
+					"-of", "json",
+					input_path
+				],
+				capture_output=True,
+				text=True
+			)
 
-		duration = float(loads(probe.stdout)["format"]["duration"])
-		# Discord 10 MB limit
-		target_bits = 10 * 1024 * 1024 * 8
-		total_bitrate = int(target_bits / duration)
-		# Reserve some bitrate for audio
-		audio_bitrate = 128_000
-		video_bitrate = max(total_bitrate - audio_bitrate, 300_000)
-		# Compress
-		subprocess.run(
-			[
-				"ffmpeg", "-y",
-				"-i", input_path,
-				"-c:v", "libx264",
-				"-b:v", str(video_bitrate),
-				"-maxrate", str(video_bitrate),
-				"-bufsize", str(video_bitrate * 2),
-				"-c:a", "aac",
-				"-b:a", str(audio_bitrate),
-				output_path
-			],
-			check=True
-		)
-		return discord.File(output_path, filename="clip.mp4")
+			duration = float(loads(probe.stdout)["format"]["duration"])
+			# Discord 10 MB limit
+			target_bits = 10 * 1024 * 1024 * 8
+			total_bitrate = int(target_bits / duration)
+			# Reserve some bitrate for audio
+			audio_bitrate = 128_000
+			video_bitrate = max(total_bitrate - audio_bitrate, 300_000)
+			# Compress
+			subprocess.run(
+				[
+					"ffmpeg", "-y",
+					"-i", input_path,
+					"-c:v", "libx264",
+					"-b:v", str(video_bitrate),
+					"-maxrate", str(video_bitrate),
+					"-bufsize", str(video_bitrate * 2),
+					"-c:a", "aac",
+					"-b:a", str(audio_bitrate),
+					output_path
+				],
+				check=True
+			)
+			return discord.File(output_path, filename="clip.mp4")
 # endregion

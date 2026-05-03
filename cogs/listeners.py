@@ -1,18 +1,23 @@
+if __name__ == "__main__":
+	raise Exception("Start the program from the main process")
 import discord, logging, re, aiohttp, asyncio
-from sys import path as sys_path, exc_info
 from discord.ext import commands
 from datetime import datetime, timedelta, UTC
+from enum import IntEnum
 from typing import TYPE_CHECKING
-from os import path
-if __name__ == "__main__":
-	sys_path.append(path.abspath(path.join(path.dirname(__file__), '..')))
-import utils.generic as genericUtil
-import utils.time as timeUtil
 if TYPE_CHECKING:
 	from modules.newsAPI import NewsAPI
 	from utils.bot import Bot
-from utils.bot import debug_only
+# ChannelIDs, RoleIDs, CategoryIDs
+# owner_only, officer_only, members_only, debug_only
+from utils.bot import ChannelIDs, RoleIDs
+import utils.generic as genericUtil
+import utils.time as timeUtil
+#import utils.wt as wtUtil
+
+# "utils.generic", "utils.time", "utils.wt"
 __reload_deps__ = ("utils.generic", "utils.time")
+
 sqb_member_last_seen = datetime.now(UTC)-timedelta(minutes=30)
 
 class Listeners(commands.Cog):
@@ -21,21 +26,13 @@ class Listeners(commands.Cog):
 		self.logger = logging.getLogger(__name__)
 		self.logger.setLevel(bot.logLevel)
 		self.last_disconnect: datetime | None = None
-		self.logger.debug("Listeners initialized")
+		self.logger.debug(f"{self.__class__.__name__} initialized")
 	# region DEFAULT LISTENERS
-	@commands.Cog.listener()
-	async def on_ready(self):
-		await self.bot.change_presence(activity=discord.Game("SQB with PECK"))
-		self.logger.info("Startup complete")
-
+	# region Bot
 	@commands.Cog.listener()
 	async def on_disconnect(self):
 		self.last_disconnect = datetime.now(UTC)
 		self.logger.debug(f"Bot disconnected as of {self.last_disconnect.isoformat()}")
-	
-	@commands.Cog.listener()
-	async def on_resumed(self):
-		self.logger.debug("Bot resumed session")
 
 	@commands.Cog.listener()
 	async def on_connect(self):
@@ -52,11 +49,30 @@ class Listeners(commands.Cog):
 			self.logger.debug(f"Bot connected at {now.isoformat()}")
 
 	@commands.Cog.listener()
+	async def on_error(self, event:str, *args, **kwargs):
+		self.logger.error(f"An error occurred in '{event}'", exc_info=True)
+		# If the event had a message, reply there
+		if args and hasattr(args[0], "channel"):
+			try:
+				await args[0].channel.send("An unexpected error occurred.")
+			except Exception:
+				pass
+
+	@commands.Cog.listener()
+	async def on_ready(self):
+		await self.bot.change_presence(activity=discord.Game("SQB with PECK"), status=discord.Status.online)
+
+	@commands.Cog.listener()
+	async def on_resumed(self):
+		self.logger.debug("Bot resumed session")
+	# endregion
+	# region Member
+	@commands.Cog.listener()
 	async def on_member_remove(self, member:discord.Member):
 		user = self.bot.db.getByDID(member.id)
 		if user:
 			user.sort(key=lambda x: x.joindate)
-			channel = self.bot.get_channel(self.bot.logsChID)
+			channel = self.bot.get_channel(self.bot.channelIDs[ChannelIDs.LOGS])
 			embed = discord.Embed(title="User left", description="A Squadron member left the server!", color=0xb7a287)
 			embed.add_field(name="Discord name", value=f"{member.name}", inline=False)
 			embed.add_field(name="UID", value=f"{member.id}", inline=False)
@@ -71,7 +87,8 @@ class Listeners(commands.Cog):
 				else:
 					user.leave_info = self.bot.db.LeaveInfo.SERVER
 				user.push()
-
+	# endregion
+	# region Message
 	trevortimes:int = 0
 	@commands.Cog.listener()
 	async def on_message(self, message:discord.Message):
@@ -80,7 +97,7 @@ class Listeners(commands.Cog):
 			embed = discord.Embed(title=f"DM sent to PECK bot")
 			embed.add_field(name="", value=message.content, inline=True)
 			embed.set_footer(text=f"{message.author.name} ({message.author.id})")
-			await self.bot.get_channel(self.bot.spamChID).send(embed=embed)
+			await self.bot.get_channel(self.bot.channelIDs[ChannelIDs.SPAM]).send(embed=embed)
 		elif "clip" in message.content.lower():
 			temp = self.bot.get_guild(self.bot.peckServer)
 			if temp is None:
@@ -103,16 +120,11 @@ class Listeners(commands.Cog):
 			subject_clips_links:list[discord.Attachment] = []
 			async for _message in subject.history(limit=None, oldest_first=True):
 				subject_clips_links.extend(_message.attachments)
-			if self.bot.clipTimeout.timed_out(message.author.id):
-				next_iter = self.bot.clipTimeout.task.next_iteration
-				if next_iter is not None:
-					expire_time = max(next_iter, self.bot.clipTimeout.getOldest(message.author.id)+timedelta(minutes=5))
-				else:
-					expire_time = self.bot.clipTimeout.getOldest(message.author.id)+timedelta(minutes=5)
+			if (expire_time := self.bot.timeouts["clip"].getExpireTime(message.author.id)) and self.bot.timeouts["clip"].isTimedOut(message.author.id):
 				await message.reply(f"You are under cooldown. It will expire {timeUtil.discord_timestamp(expire_time, "R")}", delete_after=5)
 				return
 			else:
-				self.bot.clipTimeout.addCooldown(message.author.id)
+				self.bot.timeouts["clip"].add(message.author.id)
 			if len(subject_clips_links) > 10:
 				for num, i in enumerate(range(0, len(subject_clips_links), 10)):
 					await message.reply(f"Part {num+1}:\n{"\n".join([i.url for i in subject_clips_links[i-10:i]])}", mention_author=False)
@@ -122,23 +134,19 @@ class Listeners(commands.Cog):
 		elif any(i in message.content.lower() for i in ["updoot", "downdoot", "upvote", "downvote"]):
 			updoot_msg = message.reference if message.reference else message
 			await updoot_msg.add_reaction(self.bot.get_emoji(1277999470038220902))
+			await asyncio.sleep(0.2)
 			await updoot_msg.add_reaction(self.bot.get_emoji(1277999500262244362))
 		elif (match := re.match(r"peckbot[,:\s]+(.*)", message.content, flags=re.IGNORECASE)) is not None:
 			prompt:str = match.group(1)
 			if not prompt:
 				await message.reply(f"You need to provide a prompt if you want to ask Peckbot something.", delete_after=5)
 				return
-			if self.bot.aiTimeout.timed_out(message.author.id):
-				next_iter = self.bot.aiTimeout.task.next_iteration
-				if next_iter is not None:
-					expire_time = max(next_iter, self.bot.aiTimeout.getOldest(message.author.id)+timedelta(minutes=5))
-				else:
-					expire_time = self.bot.aiTimeout.getOldest(message.author.id)+timedelta(minutes=5)
-				await message.reply(f"You are under cooldown. It will expire {timeUtil.discord_timestamp(expire_time, "R")}", delete_after=5)
+			if self.bot.timeouts["ai"].isTimedOut(message.author.id):
+				await message.reply(f"You are under cooldown. It will expire {timeUtil.discord_timestamp(self.bot.timeouts["ai"].getOldest(message.author.id)+timedelta(minutes=5), "R")}", delete_after=5)
 				return
 			else:
-				self.bot.aiTimeout.addCooldown(message.author.id)
-			async with aiohttp.ClientSession(base_url="http://desktop-alex.tail598095.ts.net") as session:
+				self.bot.timeouts["ai"].add(message.author.id)
+			async with aiohttp.ClientSession(base_url="http://127.0.0.1") as session:
 				try:
 					payload = {
 						"model": "gemma4",
@@ -159,7 +167,7 @@ class Listeners(commands.Cog):
 							return
 						data = await response.json()
 				except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
-					self.logger.exception("Peckbot request failed", exc_info=exc)
+					self.logger.exception("Peckbot request failed")
 					await message.reply("Peckbot is unavailable right now.", delete_after=5)
 					return
 				reply_text = (
@@ -177,86 +185,33 @@ class Listeners(commands.Cog):
 			await message.channel.send("https://tenor.com/view/trevor-moment-discord-swag-meme-gif-20463477") 
 			self.trevortimes += 1
 			self.logger.info(f"Trevor has been sent {self.trevortimes} times")
-	
-	@commands.Cog.listener()
-	async def on_app_command_error(self, interaction:discord.Interaction, error:Exception):
-		logging.exception("An error occurred while running a command", exc_info=error)
-		if interaction.response.is_done():
-			await interaction.edit_original_response(content="An unexpected error occurred.")
-		else:
-			await interaction.response.send_message("An unexpected error occurred.", ephemeral=True)
-
-	@commands.Cog.listener()
-	async def on_error(self, event:str, *args, **kwargs):
-		self.logger.error(f"An error occurred in '{event}'", exc_info=exc_info())
-		# If the event had a message, reply there
-		if args and hasattr(args[0], "channel"):
-			try:
-				await args[0].channel.send("An unexpected error occurred.")
-			except Exception:
-				pass
-	
-	@commands.Cog.listener()
-	async def on_voice_state_update(self, member:discord.Member, before:discord.VoiceState, after:discord.VoiceState):
-		leftChannel = before.channel is not None and after.channel is None
-		joinedChannel = before.channel is None and after.channel is not None
-		if member.id in self.bot.planSQB.applicants:
-			sqbCh = self.bot.get_channel(self.bot.sqbChID)
-			self.bot.planSQB.applicantInChannel = any(i.id in self.bot.planSQB.applicants for i in sqbCh.members)
-			if joinedChannel and after.channel.id == self.bot.sqbChID:
-				self.bot.planSQB.applicantJoinedChannel = True
-				self.bot.dispatch("sqbplancheck")
-			elif leftChannel and before.channel.id == self.bot.sqbChID and len(before.channel.members) <= 0:
-				global sqb_member_last_seen
-				sqb_member_last_seen = datetime.now(UTC)
 	# endregion
-	# region CUSTOM LISTENERS			
+	# region Scheduled Event
+	@commands.Cog.listener()
+	async def on_scheduled_event_create(self, event:discord.ScheduledEvent):
+		if event.name.startswith("["):
+			announcementsCh = self.bot.get_channel(self.bot.channelIDs[ChannelIDs.ANNOUNCEMENTS])
+			if event.name.lower().startswith("[event]"):
+				await announcementsCh.send(f"A new event is starting soon:tm:!\n{event.url}")
+			if event.name.lower().startswith("[sqb]"):
+				await announcementsCh.send(f"An SQB session has been scheduled by a member!\n{event.url}")
+	# endregion
+	# endregion
+	# region CUSTOM LISTENERS
 	@commands.Cog.listener()
 	async def on_newsapi_post(self, data:'NewsAPI.News'):
 		self.logger.debug("Dispatch for NewsAPI post received")
-		news_ch = self.bot.get_channel(self.bot.wtNewsChID)
+		news_ch = self.bot.get_channel(self.bot.channelIDs[ChannelIDs.WTNEWS])
 		ImportanceEnum = self.bot.newsAPI.News.ImportanceLevel
 		match data.importance:
 			case ImportanceEnum.EVENT:
-				ping_role = self.bot.eventNews
+				ping_role = self.bot.roleIDs[RoleIDs.EVENT_NEWS]
 			case ImportanceEnum.MAJOR:
-				ping_role = self.bot.majorNews
+				ping_role = self.bot.roleIDs[RoleIDs.MAJOR_NEWS]
 			case _:
 				ping_role = None
 		await news_ch.send(content="" if ping_role is None else f"<@&{ping_role}>", embed=data.buildEmbed(self.bot.iconURL))
 		self.logger.debug("Dispatch for NewsAPI Post complete")
-	@commands.Cog.listener()
-	async def on_sqbplancheck(self):
-		try:
-			if not timeUtil.isInTimebracket(self.bot.planSQB.timeframe if self.bot.planSQB.timeframe else None):
-				if self.bot.planSQB.timeframe and self.bot.planSQB.timeframe[1] < datetime.now(UTC):
-					self.logger.debug("Resetting bot.planSQB")
-					self.bot.planSQB = self.bot._planSQB()
-				return
-			if not self.bot.planSQB.applicantInChannel and self.bot.planSQB.applicantJoinedChannel and sqb_member_last_seen + self.bot.sqbPlanCheckLimit < datetime.now(UTC):
-				announcementsCh = self.bot.get_channel(self.bot.announcementsChID)
-				embed = discord.Embed(title="SQB cancellation", color=0xFF0000, description=f"SQB has been automatically cancelled due to no member being present for the past {round(self.bot.sqbPlanCheckLimit.total_seconds()//60%60)} minutes.")
-				await announcementsCh.send(embed=embed)
-				self.bot.planSQB = self.bot._planSQB()
-				return
-			if not self.bot.planSQB.applicantInChannel or self.bot.planSQB.announced:
-				return
-			self.logger.debug("Announcing SQB from plan")
-			sqbVCMembers = [i.id for i in self.bot.get_channel(self.bot.sqbChID).members]
-			directMentionUsers:list[discord.User] = []
-			for _id in self.bot.planSQB.applicants:
-				user = self.bot.get_user(_id)
-				if user and user.id not in sqbVCMembers:
-					try:
-						await user.send(f"The SQB session you applied for has started. Please join <#{self.bot.sqbChID}>")
-					except discord.Forbidden:
-						directMentionUsers.append(user)
-			if directMentionUsers:
-				channel = self.bot.get_channel(self.bot.announcementsChID)
-				await channel.send(f"The SQB session is starting.\nThe following people applied but could not be notified by DM\n{", ".join([i.mention for i in directMentionUsers])}")
-			self.bot.planSQB.announced = True
-		except Exception:
-			self.logger.exception("An error occurred while announcing SQB")
 	# endregion
 
 async def setup(bot:'Bot'):

@@ -1,15 +1,30 @@
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, UTC, time
 from dateutil.parser import isoparse
-from typing import Literal
+from enum import StrEnum
 
 sqb_brackets = (
-	(1, 7),
-	(14, 22)
+	(
+		time(hour=1, minute=0), 
+		time(hour=7, minute=0)
+	),
+	(
+		time(hour=14, minute=0), 
+		time(hour=22, minute=0)
+	)
 )
+
+class timestampTypes(StrEnum):
+	SHORT_TIME = "t"
+	LONG_TIME = "T"
+	SHORT_DATE = "d"
+	LONG_DATE = "D"
+	LONG_DATE_SHORT_TIME = "f"
+	DATE_WEEKDAY_TIME = "F"
+	RELATIVE = "R"
 
 def toUnix(time:datetime|str):
 	return int((isoparse(time) if isinstance(time, str) else time).timestamp())
-def discord_timestamp(timestamp:int|datetime, type:Literal["t", "T", "d", "D", "f", "F", "R"]) -> str:
+def discord_timestamp(timestamp:int|datetime, type:timestampTypes) -> str:
 	""" <t:UNIX TIMESTAMP:type>  
 	## Types
 	- Short Time: t
@@ -27,8 +42,10 @@ def get_sqb_timebracket(include_current:bool=True) -> tuple[datetime, datetime]:
 	rn = datetime.now(UTC)
 	global sqb_brackets
 	today_brackets = [
-		(rn.replace(hour=start, minute=0, second=0, microsecond=0),
-		 rn.replace(hour=end, minute=0, second=0, microsecond=0))
+		(
+			datetime.combine(rn.date(), start, tzinfo=UTC),
+		 	datetime.combine(rn.date(), end, tzinfo=UTC)
+		)
 		for start, end in sqb_brackets
 	]
 	if include_current:
@@ -43,8 +60,3 @@ def isInTimebracket(bracket:tuple[datetime]|None=None) -> bool:
 	if bracket is None:
 		bracket = get_sqb_timebracket()
 	return bracket[0] <= datetime.now(UTC) < bracket[1]
-def timeTillBracket(startTime:datetime|None=None) -> int:
-	"return the time left until the start of the next sqb timebracket in seconds"
-	if startTime is None:
-		startTime = get_sqb_timebracket(False)[0]
-	return (datetime.now(UTC) - startTime).total_seconds()
