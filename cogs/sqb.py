@@ -208,18 +208,21 @@ class SQBCog(commands.GroupCog, group_name="sqb"):
 
 	@discord.app_commands.command(name="brackets")
 	@officer_only()
-	@discord.app_commands.default_permissions(manage_channels=True)
 	@discord.app_commands.guild_only()
-	async def sqb_brackets(self, interaction:discord.Interaction):
+	async def sqb_brackets(self, interaction:discord.Interaction, pin:bool=False):
 		"""[Officer] Posts the seasonal schedule for SQB"""
 		await interaction.response.defer(thinking=True)
-		for i in (await interaction.channel.pins()):
-			if i.content.startswith("1st week:") and i.author.id == self.bot.user.id:
-				await i.delete()
-				self.logger.debug("Pinned message found and deleted")
-				break
+		if not interaction.user.guild_permissions.pin_messages: 
+			await interaction.followup.send("You don't have permissions to pin messages, the message will be posted without pinning.", ephemeral=True)
+			pin = False
+		if pin: 
+			for i in (await interaction.channel.pins()):
+				if i.content.startswith("1st week:") and i.author.id == self.bot.user.id:
+					await i.delete()
+					self.logger.debug("Pinned message found and deleted")
+					break
 		await interaction.edit_original_response(content=wtUtil.get_sqb_season())
-		await (await interaction.original_response()).pin(reason="Pinning SQB BR message")
+		if pin: await (await interaction.original_response()).pin(reason="Pinning SQB BR message")
 		def is_me(m:discord.Message):
 			return m.author == interaction.client.user
 		await interaction.channel.purge(limit=1, reason="Removing pin message", check=is_me)
