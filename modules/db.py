@@ -158,6 +158,9 @@ class UserRepository(list["UserRepository.User"]):
 					connection_attempts = connection_attempts*2
 					if connection_attempts >= 10*60:
 						raise ConnectionRefusedError("Establishing connection to database timed out.")
+			if not r.ok:
+				logger.error(f"Endpoint threw an error: {r.status_code} ({httperror(r)})")
+				return
 			if r.json()["data"] == []:
 				break
 			if not r.ok:

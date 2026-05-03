@@ -220,17 +220,13 @@ class Squadron:
 			finally:
 				await context.close()
 				await browser.close()
-def _get_raw_sqb_post():
-	logger.debug("Retrieving SQB BR data")
+def _parse_sqb_weeks() -> list[dict[str, datetime|float]]:
 	URL = "https://forum.warthunder.com/t/season-schedule-for-squadron-battles/4446"
 	response = requests.get(URL, headers=headers)
 	if response.status_code != 200:
 		raise LookupError(f"WT Forums gave back an error: {response.status_code} ({httperror(response)})")
 	post = str(BeautifulSoup(response.text, 'html.parser').find("div", class_="post").find_all("p")[1]).removeprefix("<p>").removesuffix("</p>").replace("<br/>","").split("\n")
-	logger.debug("Retrieved data")
-	return post
-def _parse_sqb_weeks() -> list[dict[str, datetime|float]]:
-	post = _get_raw_sqb_post()
+
 	rn = datetime.now(UTC)
 	weeks = []
 	for num, week in enumerate(post):
