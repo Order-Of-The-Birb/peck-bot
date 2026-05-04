@@ -33,7 +33,7 @@ class SQBCog(commands.GroupCog, group_name="sqb"):
 	@discord.app_commands.command(name="announce")
 	@members_only()
 	@discord.app_commands.guild_only()
-	@discord.app_commands.checks.cooldown(1, 30*60)
+	#@discord.app_commands.checks.cooldown(1, 30*60)
 	async def announce_sqb(self, interaction:discord.Interaction):
 		"""[Member] Announces SQB by pinging members in the announcements channel"""
 		await interaction.response.defer(ephemeral=True)
@@ -45,24 +45,45 @@ class SQBCog(commands.GroupCog, group_name="sqb"):
 			await interaction.edit_original_response(content=f"You have to be in <#{self.bot.channelIDs[ChannelIDs.SQB]}> to announce SQB.")
 			return
 		await interaction.edit_original_response(content="Announcing SQB...")
+		pingUser = interaction.user
+		if interaction.user.id == 364119745571848192 or interaction.user.id == 709449854371364895: # Alex or my Alt
+			postAsFraud:bool = False
+			async def acceptFunc(interaction2:discord.Interaction):
+				nonlocal postAsFraud
+				postAsFraud = True
+				await interaction2.edit_original_response(content="Posting as eevee")
+				return True
+			async def denyFunc(interaction2:discord.Interaction):
+				nonlocal postAsFraud
+				postAsFraud = False
+				await interaction2.edit_original_response(content="Posting as self")
+				return True
+			view = genericUtil.genericButtons(acceptFunc=acceptFunc, denyFunc=denyFunc, acceptLabel="Post as eevee", denyLabel="Post as self", removeButtonsAfter=True, timeout=2*60)
+			await interaction.edit_original_response(content="Announcing SQB...\n\nYou have the option to post as eevee or as yourself. You have 2 minutes to make your choice.\nIf you don't make a choice, it will default to posting as yourself.", view=view)
+			await view.wait()
+			if postAsFraud is None:
+				await interaction.edit_original_response(content="No option selected, posting as self", ephemeral=True, view=None)
+			elif postAsFraud:
+				pingUser = self.bot.get_user(311555617032765451 if not self.bot.debug else 332030423913725953) # eevee
 		channel = self.bot.get_channel(self.bot.channelIDs[ChannelIDs.ANNOUNCEMENTS])
-		if self.use_sqb_ping_role:
-			self.announcements += 1
+		self.announcements += 1
+		if self.use_sqb_ping_role and self.announcements >= 3:
 			role_id = 1065769588849115248
-			if self.announcements >= 3:
-				role_id = 919803983286128661
 		else:
 			role_id = 919803983286128661
-		br_data = wtUtil.get_sqb_br()
-		await channel.send(f"<@&{role_id}> an SQB ping was requested by {interaction.user.mention}. You can join <#{self.bot.channelIDs[ChannelIDs.SQB]}> to play SQB.\nCurrent BR:\n# {br_data[0] if br_data else "Could not find BR data"}\n\tTimeframe ends {timeUtil.discord_timestamp(timeUtil.get_sqb_timebracket()[1], timeUtil.timestampTypes.RELATIVE)}\n\n{await self.bot.random_propaganda()}")
+		role = self.bot.get_guild(self.bot.peckServer).get_role(role_id)
+		sqbChannel = self.bot.get_channel(self.bot.channelIDs[ChannelIDs.SQB])
+		await channel.send(f"{role.mention} an SQB ping was requested by {pingUser.mention}. You can join {sqbChannel.mention} to play SQB.\nCurrent BR:\n# {br_data.br if (br_data := wtUtil.get_sqb_br()) else "Could not find BR data"}\n\tTimeframe ends {timeUtil.discord_timestamp(timeUtil.get_sqb_timebracket()[1], timeUtil.timestampTypes.RELATIVE)}\n\n{await self.bot.random_propaganda()}")
 		await interaction.edit_original_response(content="SQB announced.")
 		embed = discord.Embed(title="SQB Announcement", color=0x0000FF, timestamp=datetime.now(UTC), description="A member just announced SQB")
 		embed.add_field(name="Username", value=f"{interaction.user.name}")
 		embed.add_field(name="User ID", value=f"{interaction.user.id}")
 		embed.add_field(name="User mention", value=interaction.user.mention)
+		if pingUser != interaction.user:
+			embed.add_field(name="Pinged as", value=f"{pingUser.name} ({pingUser.id})")
 		await (self.bot.get_channel(self.bot.channelIDs[ChannelIDs.SPAM]).send(embed=embed))
 
-	@discord.app_commands.command(name="plan")
+	#@discord.app_commands.command(name="plan")
 	@members_only()
 	@discord.app_commands.guild_only()
 	@discord.app_commands.describe(
@@ -140,12 +161,12 @@ class SQBCog(commands.GroupCog, group_name="sqb"):
 				await interaction.edit_original_response(content=f"Another session is already scheduled for the given time. Please just apply for that one.\n{event.url}")
 				return
 		class dataCheckView(discord.ui.LayoutView):
-			current_br = wtUtil.get_sqb_br(datetime.combine(_date, _time, UTC))
+			bracket = wtUtil.get_sqb_br(datetime.combine(_date, _time, UTC))
 			_1 = discord.ui.TextDisplay("The following data have been given, and the event will be created according to them. Are these correct?")
 			_2 = discord.ui.Section(
 				discord.ui.TextDisplay(f"Start time: <t:{round(planned_start.timestamp())}:s>"),
 				discord.ui.TextDisplay(f"End time: <t:{round(planned_end.timestamp())}:s>"),
-				discord.ui.TextDisplay(f"Current BR: {current_br[0] if current_br else "Could not retrieve BR data for the given date"}"),
+				discord.ui.TextDisplay(f"Current BR: {bracket.br if bracket else "Could not retrieve BR data for the given date"}"),
 				accessory=discord.ui.Button(
 					style=discord.ButtonStyle.green,
 					label="Yes"
@@ -158,7 +179,7 @@ class SQBCog(commands.GroupCog, group_name="sqb"):
 			async def acceptButton(self, interaction:discord.Interaction):
 				event = await guild.create_scheduled_event(
 					name="[SQB] Scheduled session",
-					description=f"Current BR: {self.current_br}\nCreated by: {interaction.user.name} ({interaction.user.id})",
+					description=f"Current BR: {self.bracket.br if self.bracket else 'Could not retrieve BR data for the given date'}\nCreated by: {interaction.user.name} ({interaction.user.id})",
 					channel=guild.get_channel(self.bot.channelIDs[ChannelIDs.SQB]),
 					entity_type=discord.EntityType.voice,
 					privacy_level=discord.PrivacyLevel.guild_only,
@@ -190,7 +211,7 @@ class SQBCog(commands.GroupCog, group_name="sqb"):
 			await interaction.edit_original_response(content=f"Could not find user '{identifier}' in the database")
 			return
 		current_br = wtUtil.get_sqb_br()
-		message = f"Hello {user.username}!\nYou have been drafted for SQB.\nThe current BR is {current_br[0] if current_br else "Could not get BR data"}\n{await self.bot.random_propaganda()}"
+		message = f"Hello {user.username}!\nYou have been drafted for SQB.\nThe current BR is {current_br.br if current_br else "Could not get BR data"}\n{await self.bot.random_propaganda()}"
 		dc_user2 = self.bot.get_user(user.discord_id)
 		async def accept(interaction2:discord.Interaction):
 			await interaction2.followup.send(f"Splendid, please join <#{self.bot.channelIDs[ChannelIDs.SQB]}> to start participating!")
@@ -213,11 +234,15 @@ class SQBCog(commands.GroupCog, group_name="sqb"):
 		await interaction.response.defer(thinking=True)
 		if interaction.user.guild_permissions.pin_messages and pin: 
 			for i in (await interaction.channel.pins()):
-				if i.content.startswith("1st week:") and i.author.id == self.bot.user.id:
+				if i.content.startswith("Seasonal schedule for SQB:") and i.author.id == self.bot.user.id:
 					await i.delete()
 					self.logger.debug("Pinned message found and deleted")
 					break
-		await interaction.edit_original_response(content=wtUtil.get_sqb_season())
+		sqbSeason = wtUtil.get_sqb_season()
+		messageContent = f"Seasonal schedule for SQB:\nSchedule from {sqbSeason[0].start.strftime('%Y-%m-%d')} to {sqbSeason[-1].end.strftime('%Y-%m-%d')}\n\n"
+		for bracket in sqbSeason:
+			messageContent += f"{bracket.name}: BR {bracket.br}\n\t{timeUtil.discord_timestamp(bracket.start, timeUtil.timestampTypes.SHORT_DATE)} ({timeUtil.discord_timestamp(bracket.start, timeUtil.timestampTypes.RELATIVE)}) - {timeUtil.discord_timestamp(bracket.end, timeUtil.timestampTypes.SHORT_DATE)} ({timeUtil.discord_timestamp(bracket.end, timeUtil.timestampTypes.RELATIVE)})\n\n"
+		await interaction.edit_original_response(content=messageContent)
 		if interaction.user.guild_permissions.pin_messages and pin: 
 			await (await interaction.original_response()).pin(reason="Pinning SQB BR message")
 			def is_me(m:discord.Message):
@@ -230,12 +255,17 @@ class SQBCog(commands.GroupCog, group_name="sqb"):
 	async def current_br(self, interaction:discord.Interaction):
 		"""[Public] Posts the current active BR"""
 		await interaction.response.defer()
-		tmp = wtUtil.get_sqb_br()
-		if not tmp:
+		brackets = wtUtil.get_sqb_season()
+		if not brackets:
 			await interaction.edit_original_response(content=f"Could not get current BR data. Please try again later...")
-			self.logger.error(f"sqb_br returned '{tmp}'")
 			return
-		await interaction.edit_original_response(content=f"Current BR:\n# {tmp[0]}\nCurrent BR started {timeUtil.discord_timestamp(tmp[1][0], timeUtil.timestampTypes.RELATIVE)} and ends {timeUtil.discord_timestamp(tmp[1][1], timeUtil.timestampTypes.RELATIVE)}")
+		for ind, bracket in enumerate(brackets):
+			if bracket.start <= datetime.now(UTC) < bracket.end:
+				break
+		else:
+			await interaction.edit_original_response(content=f"Could not find the current BR data. Please try again later...")
+			return
+		await interaction.edit_original_response(content=f"Current BR:\n# {brackets[ind].br}\nCurrent BR started {timeUtil.discord_timestamp(brackets[ind].start, timeUtil.timestampTypes.RELATIVE)} and ends {timeUtil.discord_timestamp(brackets[ind].end, timeUtil.timestampTypes.RELATIVE)}{f" (After: {brackets[ind+1].br})" if ind+1 < len(brackets) else ''}")
 
 async def setup(bot:'Bot'):
 	await bot.add_cog(SQBCog(bot))

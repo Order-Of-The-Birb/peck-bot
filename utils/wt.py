@@ -5,7 +5,8 @@ from bs4 import BeautifulSoup
 from urllib.parse import quote
 from json import loads
 from time import sleep
-from datetime import datetime, UTC, date
+from datetime import datetime, UTC
+from functools import cache
 from typing import TYPE_CHECKING
 from contextlib import asynccontextmanager
 if __name__ == "__main__":
@@ -220,6 +221,7 @@ class Squadron:
 			finally:
 				await context.close()
 				await browser.close()
+@cache
 def _parse_sqb_weeks() -> list[dict[str, datetime|float]]:
 	URL = "https://forum.warthunder.com/t/season-schedule-for-squadron-battles/4446"
 	response = requests.get(URL, headers=headers)
@@ -248,20 +250,30 @@ def _parse_sqb_weeks() -> list[dict[str, datetime|float]]:
 			"end": end_time
 		})
 	return weeks
-def get_sqb_season() -> str:
+class sqbBracket:
+	name: str
+	start: datetime
+	end: datetime
+	br: float
+	def __init__(self, week:dict[str, datetime|float]):
+		self.name = week.get("week")
+		self.start = week.get("start")
+		self.end = week.get("end")
+		self.br = week.get("br")
+def get_sqb_season() -> list[sqbBracket]:
 	weeks = _parse_sqb_weeks()
-	return "\n".join(f"{i["week"]}: {i["br"]}\n\t{discord_timestamp(i["start"], timestampTypes.SHORT_DATE)} ({discord_timestamp(i["start"], timestampTypes.RELATIVE)}) - {discord_timestamp(i["end"], timestampTypes.SHORT_DATE)} ({discord_timestamp(i["end"], timestampTypes.RELATIVE)})" for i in weeks)
-def get_sqb_br(other_date:datetime|None = None) -> tuple[float, tuple[date, date]]|None:
+	return [sqbBracket(week) for week in weeks]
+def get_sqb_br(other_date:datetime|None = None) -> sqbBracket|None:
 	"""Gets the BR of a given day of SQB. Will get today if no date is given."""
 	if not other_date: rn = datetime.now(UTC)
 	else: rn = other_date.astimezone(UTC)
 	weeks = _parse_sqb_weeks()
 	for week in weeks:
 		if week["start"] <= rn < week["end"]:
-			return week["br"], (week["start"], week["end"])
-	_ = weeks[-1]
+			return sqbBracket(week)
 	return None
 def get_user_ids(*usernames:str) -> dict[str, int]:
+	raise DeprecationWarning("This function is deprecated as the endpoint has been shutdown. For progress on the new API check https://github.com/Order-Of-The-Birb/ThunderAPI")
 	logger = logging.getLogger(__name__)
 	result:dict[str, int] = {}
 	session = requests.Session()

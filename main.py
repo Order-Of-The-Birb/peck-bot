@@ -15,12 +15,10 @@ bot:'Bot' = None
 def main():
 	debug:bool
 	# region Debug mode setup
-	debug = environ.get('TERM_PROGRAM') == 'vscode'
-	if not debug:
-		from argparse import ArgumentParser
-		parser = ArgumentParser()
-		parser.add_argument("-d", "--debug", help="Debug mode switch", action="store_true")
-		debug = parser.parse_args().debug
+	chdir(path.dirname(path.abspath(__file__)))
+	if not load_dotenv(".env"):
+		raise FileNotFoundError(".env file could not be loaded.")
+	debug = int(getenv("DEBUG_MODE", "0")) == 1
 	# endregion
 	# region Logging
 	def log_namer(default_name:str):
@@ -40,10 +38,6 @@ def main():
 	logging.getLogger("discord").setLevel(logging.WARNING)
 	# endregion
 	# region Client setup
-	chdir(path.dirname(path.abspath(__file__)))
-	if not load_dotenv(".env"):
-		logger.critical(".env file could not be loaded.")
-		return
 	loop = asyncio.new_event_loop()
 	asyncio.set_event_loop(loop)
 	global bot

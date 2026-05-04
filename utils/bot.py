@@ -182,7 +182,7 @@ class Bot(commands.Bot):
 				self.cleanupTask.start()
 		# endregion
 	def __init__(self, *args,**kwargs):
-		self.debug:bool = kwargs.pop("debug")
+		self.debug:bool = kwargs.pop("debug", False)
 		guild_config = _DEBUG_GUILD_CONFIG if self.debug else _LIVE_GUILD_CONFIG
 		self.channelIDs:dict[ChannelIDs, int] = guild_config.channel_ids.copy()
 		self.roleIDs:dict[RoleIDs, int] = guild_config.role_ids.copy()
