@@ -269,13 +269,16 @@ class NormalCog(commands.Cog):
 
 	@discord.app_commands.command()
 	async def ge_to_gjn(self, interaction:discord.Interaction, value:int):
-		inaccuracyDisclaimer = value < 150 or value > 75000 # Gaijin's limits
-		invalidValueChanged = value % 10 != 0 # Gaijin limit: Increments of 10
-		if invalidValueChanged: value = round(value, -1)
 		msg_content = ""
-		if invalidValueChanged: msg_content += "An invalid value was given for the value (Not divisible by 10), so the value is calculated using a rounded value\n"
-		msg_content += f"{value} GE is worth {0.0066*value} GJN/EUR\n"
-		if inaccuracyDisclaimer: msg_content += "-# Due to gaijin's limitations, we cannot make sure that the value given is the correct value\n"
+		if value % 10 != 0: # Gaijin limitation: Only sold in steps of 10
+			value = round(value, -1)
+			msg_content += "An invalid value was given for the value (Not divisible by 10), so the value is calculated using a rounded value\n"
+		msg_content += f"{value} GE is worth {round(0.0066*value, 2)} GJN/EUR\n"
+		if value < 150: # Gaijin limitation: Minimum buy value is 150 
+			msg_content += "-# Due to gaijin's limitations, this amount cannot be bought\n"
+		elif value > 75000: # Gaijin limitation: Maximum buy value at once is 75000
+			msg_content += "-# Due to gaijin's limitations, this amount can't be bought in one purchase, so the amount cannot be calculated precisely\n"
+			msg_content += f"-# This amount can be bought by purchasing {value//75000}x 75000 GE and then {value%75000} GE separately"
 		await interaction.response.send_message(msg_content)
 	
 	@discord.app_commands.command()
