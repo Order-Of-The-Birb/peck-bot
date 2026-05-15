@@ -62,13 +62,13 @@ class AdminCog(commands.Cog):
 	@discord.app_commands.guild_only()
 	@discord.app_commands.default_permissions(administrator=True)
 	@discord.app_commands.checks.has_permissions(administrator=True)
-	async def say(self, interaction:discord.Interaction, content:str, file:discord.Attachment = None):
+	async def say(self, interaction:discord.Interaction, content:str, file:discord.Attachment = None, respond_to_id:str = None):
 		"""Says the content as the bot, Only usable as the owner of the bot"""
 		await interaction.response.defer(ephemeral=True)
 		await interaction.channel.send(
 			content=content.replace("\\n", "\n"), 
 			file=(await file.to_file()) if file else None, 
-			reference=interaction.message.reference if interaction.message else None
+			reference=interaction.channel.get_partial_message(int(respond_to_id)) if respond_to_id else None
 		)
 		await interaction.delete_original_response()
 	
