@@ -68,7 +68,7 @@ class AdminCog(commands.Cog):
 		await interaction.channel.send(
 			content=content.replace("\\n", "\n"), 
 			file=(await file.to_file()) if file else None, 
-			reference=interaction.message.reference
+			reference=interaction.message.reference if interaction.message else None
 		)
 		await interaction.delete_original_response()
 	
