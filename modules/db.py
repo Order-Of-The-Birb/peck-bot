@@ -1,12 +1,13 @@
 from enum import StrEnum
 from os import getenv, _exit
+from typing import Any, TypeVar
 from requests import get, post, patch
 from requests.exceptions import ConnectionError
 from datetime import date, datetime
 from time import sleep
 from utils.generic import httperror
 from utils.wt import normalizeUsername
-from collections.abc import Iterator
+from collections.abc import Hashable, Iterator, Callable, Iterable
 
 from logging import getLogger
 logger = getLogger(__name__)
@@ -24,39 +25,53 @@ class UserRepository(list["UserRepository.User"]):
 		UNVERIFIED = "unverified"
 		APPLICANT = "applicant"
 	class User:
+		class Editor:
+			def __init__(self, user: "UserRepository.User"):
+				self.user = user
+			
+			def __enter__(self):
+				return self.user
+			
+			def __exit__(self, exc_type, exc, tb):
+				if exc_type is not None:
+					self.user.rollback()
+					return False
+				if not self.user.commit():
+					logger.error(f"Failed to commit changes for user {self.user.gaijin_id}")
+					self.user.rollback()
+					raise RuntimeError(f"Failed to commit changes for user {self.user.gaijin_id}")
+				return False
+
 		__base_url:str
 		__token:str
 		__data:dict[str, int|str|None]
+		__saved_data:dict[str, int|str|None]
 		def __init__(self, base_url:str, token:str, **data:int|str):
 			self.__base_url = base_url
 			self.__token = token
 			self.__data = data
+			self.__saved_data = data.copy()
 		def pull(self) -> bool:
 			r = get(self.__base_url+f"users/{self.gaijin_id}")
 			if not r.ok:
 				logger.error(f"Endpoint threw an error: {r.status_code} ({httperror(r)})")
 				return False
 			self.__data:dict[str, int|str] = r.json()["data"]
+			self.__saved_data = self.__data.copy()
 			return True
 		def push(self) -> bool:
-			r = get(self.__base_url+f"users/{self.gaijin_id}")
-			if not r.ok:
-				logger.error(f"An error occurred when getting the current data of user {self.gaijin_id} returned {r.status_code} ({httperror(r)})")
-				return False
-			currentData:dict[str, int|str] = r.json()["data"]
-			editedValues:dict[str, str|int] = {}
-			for k, i in currentData.items():
-				_ = self.__data.get(k)
-				if i != _:
-					editedValues[k] = _
-			del currentData
-			r = get(self.__base_url+f"users/{self.gaijin_id}/leave_info")
-			if not r.ok:
-				logger.error(f"Leave info returned {r.status_code} ({httperror(r)})")
-				return False
-			if (None if self.leave_info is None else self.leave_info.value) != r.json()["data"]:
+			editedValues:dict[str, str|int|None] = {
+			    key: value
+			    for key, value in self.__data.items()
+			    if key != "leave_info" and self.__saved_data.get(key) != value
+			}
+
+			if self.__data.get("leave_info") != self.__saved_data.get("leave_info"):
 				if self.leave_info is not None:
-					r = patch(self.__base_url+f"users/{self.gaijin_id}/leave_info", json={"type":self.leave_info.value, "token": self.__token})
+					r = patch(
+						self.__base_url+f"users/{self.gaijin_id}/leave_info", 
+						json={"type":self.leave_info.value, "token": self.__token}
+					)
 					if not r.ok:
 						logger.error(f"Failed to update the following member's leave info: {self.gaijin_id} returned {r.status_code} ({httperror(r)})")
 						return False	
@@ -67,6 +82,17 @@ class UserRepository(list["UserRepository.User"]):
 					logger.error(f"Failed to update the following member: {self.gaijin_id} returned {r.status_code} ({httperror(r)})")
 					return False
 			return True
+		
+		def rollback(self) -> None:
+			self.__data = self.__saved_data.copy()
+		def commit(self) -> bool:
+			if self.push():
+				self.__saved_data = self.__data.copy()
+				return True
+			return False
+	
+		def edit(self):
+			return self.Editor(self)
 		#region Gaijin ID
 		@property
 		def gaijin_id(self) -> int:
@@ -208,3 +234,36 @@ class UserRepository(list["UserRepository.User"]):
 			if user.discord_id == discord_id:
 				tmp.append(user)
 		return tmp
+
+	def query(self) -> "Query[UserRepository.User]":
+		return Query(self)
+
+# C# LINQ esque querying system
+T = TypeVar("T")
+class Query(list[T]):
+    def __init__(self, items: Iterable[T]):
+        self.items = list(items)
+
+    def where(self, key: Callable[[T], bool]) -> "Query[T]":
+        return Query(item for item in self.items if key(item))
+
+    def orderBy(self, key: Callable[[T], Any], desc: bool = False) -> "Query[T]":
+        return Query(sorted(self.items, key=key, reverse=desc))
+
+    def distinct(self, key: Callable[[T], Hashable]) -> "Query[T]":
+        seen = set()
+        result = []
+
+        for item in self.items:
+            value = key(item)
+            if value not in seen:
+                seen.add(value)
+                result.append(item)
+
+        return Query(result)
+
+    def any(self, key: Callable[[T], bool]) -> bool:
+        return any(key(item) for item in self.items)
+
+    def first(self) -> T | None:
+        return self.items[0] if self.items else None

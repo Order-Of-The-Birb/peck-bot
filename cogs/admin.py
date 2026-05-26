@@ -1,10 +1,11 @@
 if __name__ == "__main__":
 	raise Exception("Start the program from the main process")
-import discord, logging
+import discord, logging, re
 from discord.ext import commands
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 if TYPE_CHECKING:
 	from utils.bot import Bot
+	from modules.db import UserRepository
 # ChannelIDs, RoleIDs, CategoryIDs
 # owner_only, officer_only, members_only, debug_only
 #from utils.bot import 
@@ -127,5 +128,50 @@ class AdminCog(commands.Cog):
 			await user.ban(delete_message_seconds=delete_messages, reason=reason)
 		await interaction.guild.unban(user, reason="softban")
 		await interaction.edit_original_response(content="User has been softbanned.")
+	
+	#region TEMPORARY CODE
+	class SQBStanceQuestionView(discord.ui.LayoutView):
+		header = discord.ui.TextDisplay(content="Placeholder text")
+		text = discord.ui.TextDisplay(content="We are trying to implement a new system, where we separate people who want to play competitively (SQB) and people who just want to chill.\n\nTherefore we are implementing this system where we ask all users whether they would like to be pinged for SQB or not.\nYou can select using the two buttons below.")
+		def __init__(self, bot:'Bot', user:'UserRepository.User'):
+			self.targetUser = user
+			self.bot = bot
+			self.header.content = f"Hello {user.username}"
+			super().__init__(timeout=None)
+		@classmethod
+		def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match: re.Match[str], /):
+			bot = cast("Bot", interaction.client)
+			return cls(interaction.client, bot.db.getByDID(int(match.group(1))))
+		
+		@discord.ui.button(
+			label="I would like to participate", 
+			custom_id="sqbStance:accept:0", 
+			style=discord.ButtonStyle.primary
+		)
+		async def acceptSqbBtn(self, interaction: discord.Interaction, button: discord.ui.Button):
+			await interaction.response.send_message("Your participation has been noted. Thank you for responding.")
+			...
+		...
+
+	@discord.app_commands.command()
+	@discord.app_commands.default_permissions(administrator=True)
+	async def sendSQBDms(self, interaction:discord.Interaction):
+		await interaction.response.defer(thinking=True)
+		for user in self.bot.db.query().distinct(lambda u: u.discord_id):
+			if user.status != self.bot.db.Status.MEMBER: continue
+			if not user.discord_id:
+				self.logger.warning(f"Could not obtain discord ID of user {user.username}. Defaulting to Not participating")
+				continue
+			dc_user = self.bot.get_user(user.discord_id)
+			if not dc_user:
+				self.logger.error(f"Could not get discord user belonging to {user.username}. Defaulting to Not participating")
+				continue
+			try:
+				if user.username != "Maho_Yoshino": continue
+				await dc_user.send(view=self.SQBStanceQuestionView())
+			except discord.Forbidden:
+				self.logger.warning(f"Could not send DM to user {user.username}, they probably have DMs turned off. Defaulting to Not participating")
+	#endregion
+
 async def setup(bot: 'Bot'):
 	await bot.add_cog(AdminCog(bot))
