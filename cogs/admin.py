@@ -129,49 +129,72 @@ class AdminCog(commands.Cog):
 			await user.ban(delete_message_seconds=delete_messages, reason=reason)
 		await interaction.guild.unban(user, reason="softban")
 		await interaction.edit_original_response(content="User has been softbanned.")
-	class SQBStanceQuestionView(discord.ui.LayoutView):
-		header = discord.ui.TextDisplay(content="Placeholder text")
-		text = discord.ui.TextDisplay(content="We are trying to implement a new system, where we separate people who want to play competitively (SQB) and people who just want to chill.\n\nTherefore we are implementing this system where we ask all users whether they would like to be pinged for SQB or not.\nYou can select using the two buttons below.")
-		def __init__(self, bot:'Bot', user:'UserRepository.User'):
-			self.targetUser = user
-			self.bot = bot
-			self.header.content = f"Hello {user.username}"
-			super().__init__(timeout=None)
-		@classmethod
-		def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match: re.Match[str], /):
-			bot = cast("Bot", interaction.client)
-			return cls(interaction.client, bot.db.getByDID(int(match.group(1))))
-		
-		@discord.ui.button(
-			label="I would like to participate", 
-			custom_id="sqbStance:accept:0", 
-			style=discord.ButtonStyle.primary
-		)
-		async def acceptSqbBtn(self, interaction: discord.Interaction, button: discord.ui.Button):
-			await interaction.response.send_message("Your participation has been noted. Thank you for responding.")
-			...
-		...
 
 	#region TEMPORARY CODE
 	@discord.app_commands.command()
 	@discord.app_commands.default_permissions(administrator=True)
 	async def send_sqb_dms(self, interaction:discord.Interaction):
 		await interaction.response.defer(thinking=True)
-		for user in self.bot.db.query().distinct(lambda u: u.discord_id):
-			if user.status != self.bot.db.Status.MEMBER: continue
-			if not user.discord_id:
-				self.logger.warning(f"Could not obtain discord ID of user {user.username}. Defaulting to Not participating")
-				continue
+		successful_dm = 0
+		failed_dm = 0
+		usercount = 0
+		for user in self.bot.db.distinct(lambda u: u.discord_id).where(lambda u: u.discord_id is not None and u.status == self.bot.db.Status.MEMBER and u.sqb_part is None):
+			usercount += 1
+			if user.username != "Maho_Yoshino": continue
 			dc_user = self.bot.get_user(user.discord_id)
 			if not dc_user:
-				self.logger.error(f"Could not get discord user belonging to {user.username}. Defaulting to Not participating")
+				failed_dm += 1
 				continue
 			try:
-				if user.username != "Maho_Yoshino": continue
-				await dc_user.send(view=self.SQBStanceQuestionView())
+				await dc_user.send(
+					content=f"Hello {user.username}\n\nWe are trying to implement a new system, where we separate people who want to play competitively (SQB) and people who just want to chill.\n\nTherefore we are implementing this system where we ask all users whether they would like to be pinged for SQB or not.\nYou can select using the two buttons below.\n\n-# If you do not reply, you will be defaulted to the 'Not participating' group, and will not be pinged for SQB related things, but also won't be able to ping for anything SQB related.",
+					view=SQBStanceQuestionView(self.bot, user),
+				)
+				successful_dm += 1
 			except discord.Forbidden:
 				self.logger.warning(f"Could not send DM to user {user.username}, they probably have DMs turned off. Defaulting to Not participating")
+				failed_dm += 1
+		await interaction.edit_original_response(content=f"Tried sending DMs to {usercount} users\n\tOf which {failed_dm} failed\n\tAnd {successful_dm} were successful in sending")
 	#endregion
 
+class SQBStanceQuestionView(discord.ui.View):
+	def __init__(self, bot:'Bot', user:'UserRepository.User'):
+		self.bot = bot
+		self.targetUser = user
+		super().__init__(timeout=None)
+		acceptBtn = discord.ui.Button(
+			label="I would like to participate",
+			custom_id=f"sqbStance:accept:{user.discord_id}",
+			style=discord.ButtonStyle.success,
+		)
+		acceptBtn.callback = self.acceptSqbBtn_callback
+		self.add_item(acceptBtn)
+		declineBtn = discord.ui.Button(
+			label="I would not like to participate",
+			custom_id=f"sqbStance:decline:{user.discord_id}",
+			style=discord.ButtonStyle.danger,
+		)
+		declineBtn.callback = self.declineSqbBtn_callback
+		self.add_item(declineBtn)
+	async def acceptSqbBtn_callback(self, interaction: discord.Interaction):
+		await interaction.response.edit_message(
+			content="Your participation has been noted. Thank you for responding.\n\n-# If you would like to change your stance later, use the command `/sqb participation true/false`",
+			view=None,
+		)
+		self.targetUser.sqb_part = True
+		self.targetUser.push()
+	async def declineSqbBtn_callback(self, interaction: discord.Interaction):
+		self.targetUser.sqb_part = False
+		if self.targetUser.push():
+			await interaction.response.edit_message(
+				content="Your non-participation has been noted. Thank you for responding.\n\n-# If you would like to change your stance later, use the command `/sqb participation true/false`",
+				view=None
+			)
+		else:
+			await interaction.followup.send(f"Failed to update your participation status. Please contact mahoyoshino (discord ID {self.bot.owner_id}) to resolve this issue", ephemeral=True)
+
 async def setup(bot: 'Bot'):
-	await bot.add_cog(AdminCog(bot))
+	cog = AdminCog(bot)
+	await bot.add_cog(cog)
+	for user in bot.db.distinct(lambda u: u.discord_id).where(lambda u: u.discord_id is not None and u.status == bot.db.Status.MEMBER and u.sqb_part is None):
+		bot.add_view(SQBStanceQuestionView(bot, user))
