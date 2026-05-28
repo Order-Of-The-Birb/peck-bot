@@ -18,13 +18,13 @@ from utils.bot import owner_only
 __reload_deps__ = ()
 
 async def reload_autocomplete(interaction: discord.Interaction, current: str):
-	options = [
+	options = [i.removeprefix("cogs.") for i in EXTENSIONS]
+	options.append("db")
+	options.append("all")
+	return [
 		discord.app_commands.Choice(name=i, value=i)
-		for i in [i.removeprefix("cogs.") for i in EXTENSIONS] if current.lower() in i.lower()
+		for i in options if current.lower() in i.lower()
 	]
-	if current.lower() in "all":
-		options.append(discord.app_commands.Choice(name="all", value="all"))
-	return options
 class OwnerCog(commands.Cog):
 	def __init__(self, bot:'Bot'):
 		self.bot = bot
@@ -44,6 +44,12 @@ class OwnerCog(commands.Cog):
 					deps = getattr(module, "__reload_deps__", ())
 					await self.bot.reload_extension_with_deps(ext, *deps)
 				await interaction.edit_original_response(content="Reloaded all cogs")
+			elif extension.lower() == "db":
+				module = sysmodules.get("utils.db")
+				deps = getattr(module, "__reload_deps__", ())
+				await self.bot.reload_extension_with_deps("utils.db", *deps)
+				await interaction.edit_original_response(content="Reloaded database module")
+				self.logger.info("Reloaded database module")
 			else:
 				full = f"cogs.{extension}"
 				module = sysmodules.get(full)
@@ -66,6 +72,13 @@ class OwnerCog(commands.Cog):
 		except Exception:
 			self.logger.exception("An error occured while syncing")
 			await interaction.edit_original_response(content="An error occurred while syncing")
+	
+	@discord.app_commands.command()
+	@owner_only()
+	async def refresh_db(self, interaction:discord.Interaction):
+		await interaction.response.defer(thinking=True)
+		self.bot.db.refresh()
+		await interaction.edit_original_response(content="Refreshed database connection")
 
 async def setup(bot: 'Bot'):
 	await bot.add_cog(OwnerCog(bot))
