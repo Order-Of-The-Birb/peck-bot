@@ -1,8 +1,9 @@
 if __name__ == "__main__":
 	raise Exception("Start the program from the main process")
-import discord, logging, re
+import discord
+from logging import getLogger
 from discord.ext import commands
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 if TYPE_CHECKING:
 	from utils.bot import Bot
 	from modules.db import UserRepository
@@ -20,7 +21,7 @@ class AdminCog(commands.Cog):
 	bot:'Bot'
 	def __init__(self, bot:'Bot'):
 		self.bot = bot
-		self.logger = logging.getLogger(__name__)
+		self.logger = getLogger(__name__)
 		self.logger.setLevel(bot.logLevel)
 		self.exclude_file = "userlist_exclude.txt"
 		self.logger.debug(f"{self.__class__.__name__} initialized")
@@ -128,8 +129,6 @@ class AdminCog(commands.Cog):
 			await user.ban(delete_message_seconds=delete_messages, reason=reason)
 		await interaction.guild.unban(user, reason="softban")
 		await interaction.edit_original_response(content="User has been softbanned.")
-	
-	#region TEMPORARY CODE
 	class SQBStanceQuestionView(discord.ui.LayoutView):
 		header = discord.ui.TextDisplay(content="Placeholder text")
 		text = discord.ui.TextDisplay(content="We are trying to implement a new system, where we separate people who want to play competitively (SQB) and people who just want to chill.\n\nTherefore we are implementing this system where we ask all users whether they would like to be pinged for SQB or not.\nYou can select using the two buttons below.")
@@ -153,9 +152,10 @@ class AdminCog(commands.Cog):
 			...
 		...
 
+	#region TEMPORARY CODE
 	@discord.app_commands.command()
 	@discord.app_commands.default_permissions(administrator=True)
-	async def sendSQBDms(self, interaction:discord.Interaction):
+	async def send_sqb_dms(self, interaction:discord.Interaction):
 		await interaction.response.defer(thinking=True)
 		for user in self.bot.db.query().distinct(lambda u: u.discord_id):
 			if user.status != self.bot.db.Status.MEMBER: continue

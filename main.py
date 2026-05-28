@@ -1,9 +1,9 @@
 #General imports
 import discord, asyncio, logging
+from contextlib import suppress
 from logging.handlers import TimedRotatingFileHandler
 from os import environ, getenv, chdir, path
 from dotenv import load_dotenv
-from uvicorn import server
 # Custom packages
 from cogs import EXTENSIONS
 from utils.bot import Bot
@@ -79,34 +79,70 @@ def main():
 		logger.debug("Received signal to invalidate cache")
 		bot.db.refresh()
 		return {"ok": True}
+	config = uvicorn.Config(
+		app,
+		host="127.0.0.1",
+		port=5000,
+		log_level="warning",
+		loop="asyncio"
+	)
+	api_server = uvicorn.Server(config)
 	async def start_api():
-		config = uvicorn.Config(
-			app,
-			host="127.0.0.1",
-			port=5000,
-			log_level="warning",
-			loop="asyncio"
-		)
-		server = uvicorn.Server(config)
-		await server.serve()
+		await api_server.serve()
 	# endregion
+	async def cleanup_resources():
+		if bot is None:
+			return
+		for timeout in bot.timeouts.values():
+			timeout.stop()
+		if bot.newsAPI is not None:
+			news_tasks = [
+				task for task in (bot.newsAPI.periodicTask, bot.newsAPI.periodicChLogTask)
+				if task is not None
+			]
+			for task in news_tasks:
+				task.cancel()
+			if news_tasks:
+				await asyncio.gather(*news_tasks, return_exceptions=True)
+			if bot.newsAPI.session is not None and not bot.newsAPI.session.closed:
+				await bot.newsAPI.session.close()
+				logger.debug("NewsAPI aiohttp session closed.")
+		if not bot.is_closed():
+			await bot.close()
 	async def run_all():
-		await asyncio.gather(bot.start(token), start_api())
+		bot_task = loop.create_task(bot.start(token), name="discord-bot")
+		api_task = loop.create_task(start_api(), name="cache-api")
+		try:
+			done, _ = await asyncio.wait({bot_task, api_task}, return_when=asyncio.FIRST_EXCEPTION)
+			for task in done:
+				task.result()
+		finally:
+			api_server.should_exit = True
+			if not bot_task.done():
+				bot_task.cancel()
+			if not api_task.done():
+				with suppress(asyncio.CancelledError):
+					await api_task
+			if not bot_task.done():
+				with suppress(asyncio.CancelledError):
+					await bot_task
+			await cleanup_resources()
+	run_task = loop.create_task(run_all())
 	try:
-		loop.run_until_complete(run_all())
+		loop.run_until_complete(run_task)
 	except KeyboardInterrupt:
 		logger.info("Shutting down due to Keyboard Interrupt...")
-		if bot is not None and bot.newsAPI is not None:
-			if bot.newsAPI.session is not None and not bot.newsAPI.session.closed:
-				loop.run_until_complete(bot.newsAPI.session.close())
-				logger.debug("NewsAPI aiohttp session closed.")
-			if bot.newsAPI.periodicTask is not None:
-				bot.newsAPI.periodicTask.cancel()
-			if bot.newsAPI.periodicChLogTask is not None:
-				bot.newsAPI.periodicChLogTask.cancel()
+		run_task.cancel()
+		loop.run_until_complete(asyncio.gather(run_task, return_exceptions=True))
 	except Exception:
 		logger.exception("An exception occurred that caused the program to stall")
 	finally:
+		pending_tasks = [task for task in asyncio.all_tasks(loop) if not task.done()]
+		for task in pending_tasks:
+			task.cancel()
+		if pending_tasks:
+			loop.run_until_complete(asyncio.gather(*pending_tasks, return_exceptions=True))
+		loop.run_until_complete(loop.shutdown_asyncgens())
 		loop.close()
 		exit(0)
 if __name__ == "__main__" or __package__ is None:
