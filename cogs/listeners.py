@@ -3,7 +3,6 @@ if __name__ == "__main__":
 import discord, logging, asyncio
 from discord.ext import commands
 from datetime import datetime, timedelta, UTC
-from enum import IntEnum
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
 	from modules.newsAPI import NewsAPI

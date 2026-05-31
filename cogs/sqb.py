@@ -2,8 +2,7 @@ if __name__ == "__main__":
 	raise Exception("Start the program from the main process")
 import discord, logging
 from discord.ext import commands
-from pathlib import Path
-from datetime import datetime, UTC, timedelta, time, date
+from datetime import datetime, UTC, timedelta
 from typing import TYPE_CHECKING
 if __name__ == "__main__":
 	from os import path

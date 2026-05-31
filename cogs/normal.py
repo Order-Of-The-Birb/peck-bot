@@ -3,7 +3,7 @@ if __name__ == "__main__":
 import discord, logging, re
 from discord.ext import commands
 from typing import TYPE_CHECKING
-from datetime import datetime, UTC, timedelta
+from datetime import datetime, UTC
 from psutil import virtual_memory, Process as psutilProcess
 from psutil._common import bytes2human
 if __name__ == "__main__":

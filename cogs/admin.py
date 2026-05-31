@@ -8,7 +8,7 @@ if TYPE_CHECKING:
 # ChannelIDs, RoleIDs, CategoryIDs
 # owner_only, officer_only, members_only, debug_only
 #from utils.bot import 
-import utils.generic as genericUtil
+#import utils.generic as genericUtil
 #import utils.time as timeUtil
 import utils.wt as wtUtil
 

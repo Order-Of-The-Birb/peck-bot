@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 # owner_only, officer_only, members_only, debug_only
 from utils.bot import ChannelIDs, RoleIDs, debug_only
 #import utils.generic as genericUtil
-import utils.time as timeUtil
+#import utils.time as timeUtil
 import utils.wt as wtUtil
 
 # "utils.generic", "utils.time", "utils.wt"
