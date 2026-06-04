@@ -133,5 +133,15 @@ class AdminCog(commands.Cog):
 			await user.ban(delete_message_seconds=delete_messages, reason=reason)
 		await interaction.guild.unban(user, reason="softban")
 		await interaction.edit_original_response(content="User has been softbanned.")
+	
+	@discord.app_commands.command()
+	@discord.app_commands.guild_only()
+	@discord.app_commands.default_permissions(administrator=True)
+	async def check_news(self, interaction:discord.Interaction):
+		await interaction.response.defer(thinking=True, ephemeral=True)
+		await self.bot.newsAPI.periodicNewsPing(True)
+		await self.bot.newsAPI.periodicChLogPing(True)
+		await interaction.edit_original_response(content="Checked for news and changelogs")
+		
 async def setup(bot: 'Bot'):
 	await bot.add_cog(AdminCog(bot))

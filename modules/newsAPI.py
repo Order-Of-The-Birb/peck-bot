@@ -221,7 +221,7 @@ Changelogs news (webscraping): 'https://warthunder.com/en/game/changelog/'
 		self.lastPostedNewsID = news[0].id
 		await self.setID(self.lastPostedNewsID)
 		return []
-	async def periodicNewsPing(self):
+	async def periodicNewsPing(self, return_after:bool = False):
 		await self.bot.wait_until_ready()
 		while True:
 			latest:list['NewsAPI.News'] = (await self.newsSincePost(self.lastPostedNewsID))[::-1]
@@ -231,8 +231,9 @@ Changelogs news (webscraping): 'https://warthunder.com/en/game/changelog/'
 					self.bot.dispatch("newsapi_post", news) 
 					self._logger.debug(f"Dispatched news id {news.id} to listener")
 				await self.setID(latest[-1])
+			if return_after: return
 			await asleep(self.__calcDelay__())
-	async def periodicChLogPing(self):
+	async def periodicChLogPing(self, return_after:bool = False):
 		await self.bot.wait_until_ready()
 		while True:
 			latest = await self.fetchLatestChLog()
@@ -241,6 +242,7 @@ Changelogs news (webscraping): 'https://warthunder.com/en/game/changelog/'
 				self.bot.dispatch("newsapi_post", latest) 
 				self._logger.debug(f"Dispatched changelog id {latest.id} to listener")
 				await self.setID(latest, _type="Changelogs")
+			if return_after: return
 			await asleep(self.__calcDelay__(True))
 	def __calcDelay__(self, isChangelogs:bool=False) -> int:
 		rn = datetime.now(UTC)

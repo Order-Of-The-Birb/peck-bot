@@ -105,7 +105,8 @@ class Listeners(commands.Cog):
 			embed.set_footer(text=f"{message.author.name} ({message.author.id})")
 			await self.bot.get_channel(self.bot.channelIDs[ChannelIDs.SPAM]).send(embed=embed)
 		elif message.channel.id == self.bot.channelIDs[ChannelIDs.WTNEWS]:
-			await message.delete()
+			if "warthunder.com" not in message.content.lower():
+				await message.delete()
 		elif "clip" in message.content.lower():
 			temp = self.bot.get_guild(self.bot.peckServer)
 			if temp is None:
