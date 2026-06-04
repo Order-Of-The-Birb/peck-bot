@@ -65,6 +65,12 @@ class AdminCog(commands.Cog):
 	async def say(self, interaction:discord.Interaction, content:str, file:discord.Attachment = None, respond_to_id:str = None):
 		"""Says the content as the bot, Only usable as the owner of the bot"""
 		await interaction.response.defer(ephemeral=True)
+		if "-" in respond_to_id: # copy message ID returns <channelID>-<messageID> when holding shift
+			parts = respond_to_id.split("-")
+			if parts[0] != str(interaction.channel_id):
+				await interaction.edit_original_response(content="Channel ID for message doesn't match the current channel")
+				return
+			respond_to_id = parts[1]
 		await interaction.channel.send(
 			content=content.replace("\\n", "\n"), 
 			file=(await file.to_file()) if file else None, 
