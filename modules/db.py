@@ -153,19 +153,14 @@ class UserRepository(list["UserRepository.User"]):
 					r = get(self.__base_url+f"users?page={i}&per_page=100", headers={"accepts": "application/json"})
 					break
 				except ConnectionError:
-					logger.warning(f"Database API could not be reached. Retrying in {f"{connection_attempts//60} minutes" if connection_attempts > 60 else ""}{connection_attempts%60} seconds")
+					logger.warning(f"Database API could not be reached. Retrying in {f"{connection_attempts//60} minute{"s" if connection_attempts//60 > 1 else ""} " if connection_attempts > 60 else ""}{connection_attempts%60} seconds")
 					sleep(connection_attempts)
 					connection_attempts = connection_attempts*2
 					if connection_attempts >= 10*60:
 						raise ConnectionRefusedError("Establishing connection to database timed out.")
-			if not r.ok:
-				logger.error(f"Endpoint threw an error: {r.status_code} ({httperror(r)})")
-				return
+			r.raise_for_status()
 			if r.json()["data"] == []:
 				break
-			if not r.ok:
-				logger.error(f"Endpoint threw an error: {r.status_code} ({httperror(r)})")
-				return
 			self.extend(self.User(self.__base_url, self.__api_token, **item) for item in r.json()["data"])
 			i += 1
 		logger.info("Refreshed user cache")
