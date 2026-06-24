@@ -9,6 +9,7 @@ from bs4 import BeautifulSoup, Tag
 from pathlib import Path
 from discord import Embed
 from enum import Enum
+from re import search as re_search, IGNORECASE
 if __name__ == "__main__":
 	from os import path
 	from sys import path as sys_path
@@ -120,6 +121,8 @@ Changelogs news (webscraping): 'https://warthunder.com/en/game/changelog/'
 							) or
 							"black friday" in title
 						)
+					) or (
+						re_search("Meet the “[A-z0-9 ]+” Major Update!", title, IGNORECASE) is not None and self.pinned 
 					)
 				):
 				return self.ImportanceLevel.MAJOR
