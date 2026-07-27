@@ -229,14 +229,17 @@ class SQBCog(commands.GroupCog, group_name="sqb"):
 	@discord.app_commands.command(name="brackets")
 	@discord.app_commands.guild_only()
 	async def sqb_brackets(self, interaction:discord.Interaction, pin:bool=False):
-		"""[Officer] Posts the seasonal schedule for SQB"""
+		"""Posts the seasonal schedule for SQB"""
 		await interaction.response.defer(thinking=True)
 		if interaction.user.guild_permissions.pin_messages and pin: 
-			for i in (await interaction.channel.pins()):
-				if i.content.startswith("Seasonal schedule for SQB:") and i.author.id == self.bot.user.id:
+			for i in (await interaction.channel.pins(limit=None)):
+				if i.content.startswith("Seasonal schedule for SQB:") and i.author.id in self.bot.botIDs:
 					await i.delete()
 					self.logger.debug("Pinned message found and deleted")
 					break
+		elif (not interaction.user.guild_permissions.pin_messages and pin):
+			await interaction.edit_original_response(content="You do not have the permission to pin messages")
+			return
 		sqbSeason = wtUtil.get_sqb_season()
 		messageContent = f"Seasonal schedule for SQB:\nSchedule from {sqbSeason[0].start.strftime('%Y-%m-%d')} to {sqbSeason[-1].end.strftime('%Y-%m-%d')}\n\n"
 		for bracket in sqbSeason:

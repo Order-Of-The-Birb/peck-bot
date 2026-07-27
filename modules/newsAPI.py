@@ -156,19 +156,25 @@ Changelogs news (webscraping): 'https://warthunder.com/en/game/changelog/'
 	lastPostedNewsID:int
 	lastPostedChLogsID:int
 	async def setID(self, ID:int|News=None, _type:Literal["News", "Changelogs"] = "News"):
-		self._logger.debug(f"Writing value {ID} for {_type}")
+		self._logger.debug(f"Writing value {ID if isinstance(ID, int) else ID.id} for {_type}")
 		if _type == "News":			keyValue = "lastPostedID"
 		elif _type == "Changelogs":	keyValue = "lastPostedChLogID"
 		else:
 			return self._logger.error(f"keyValue given is neither 'News' or 'Changelogs'. Instead it is '{_type}'")
+
 		with self.lock:
-			with open("modules/news.json", "r") as _:content = load(_)
+			with open("modules/news.json", "r") as _:
+				content = load(_)
 			if isinstance(ID, int):			content[keyValue] = ID
 			elif isinstance(ID, self.News): content[keyValue] = ID.id
 			else: return self._logger.error(f"ID given is neither type 'int' or 'News'. Instead it is '{type(ID)}'")
-			with open("modules/news.json", "w") as file: dump(content, file, indent=4)
-			if _type == "News":	self.lastPostedNewsID		 = content[keyValue]
-			else:				self.lastPostedChLogsID 	 = content[keyValue]
+
+			with open("modules/news.json", "w") as file: 
+				dump(content, file, indent=4)
+			if _type == "News":	
+				self.lastPostedNewsID = content[keyValue]
+			else:
+				self.lastPostedChLogsID = content[keyValue]
 		self._logger.debug("Data written.")
 	async def fetchNews(self) -> list[News]:
 		"""Fetches the latest news from the News API."""
