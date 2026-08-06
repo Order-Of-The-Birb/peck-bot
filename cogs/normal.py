@@ -263,7 +263,7 @@ class NormalCog(commands.Cog):
 		try:
 			file = await genericUtil.convertImageToGif(image)
 		except ValueError as e:
-			await interaction.edit_original_response(content=e)
+			await interaction.edit_original_response(content=str(e))
 			return
 		await interaction.edit_original_response(content="Here you go", attachments=[file,])
 
