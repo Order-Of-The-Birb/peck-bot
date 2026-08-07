@@ -1,4 +1,4 @@
-import requests, aiohttp, discord, logging, tempfile, re, subprocess
+import requests, aiohttp, asyncio, discord, logging, tempfile, re, subprocess
 from typing import TYPE_CHECKING, Protocol
 from os import path
 from io import BytesIO
@@ -7,6 +7,7 @@ if TYPE_CHECKING:
 	from utils.bot import Bot
 
 MAX_FILE_SIZE = 8 * 1024 * 1024 # 8MB
+logger = logging.getLogger(__name__)
 class callbackProtocol(Protocol):
 	async def __call__(
 		self,
@@ -72,35 +73,51 @@ async def convertImageToGif(image:discord.Attachment) -> discord.File:
 	file_extension = image.filename.split(".")[-1].lower()
 	if not file_extension in allowed_types:
 		raise ValueError(f"File was not provided in a supported format.\nThe following formats are supported: {", ".join(allowed_types)}")
-	gif_data = bytes()
-	with tempfile.TemporaryDirectory() as tempdir:
-		input_path = path.join(tempdir, f"input.{image.filename.split(".")[-1]}")
-		output_path = path.join(tempdir, "output.gif")
-		with open(input_path, "wb") as f:
-			f.write(await image.read())
-		subprocess.run(
-			[
-				"ffmpeg",
-				"-hide_banner",
-				"-loglevel", "error",
-				"-loop", "1",
-				"-framerate", "2",
-				"-t", "1",
-				"-i", input_path,
-				"-filter_complex",
-				"[0:v]format=rgb24,split[a][b];"
-				"[a]palettegen=max_colors=256[p];"
-				"[b][p]paletteuse=dither=sierra2_4a",
-				"-loop", "0",
-				"-y",
-				output_path,
-			],
-			check=True,
-		)
-		with open(output_path, "rb") as file:
-			gif_data = BytesIO(file.read())
-
-	gif_data.seek(0)
+	if image.size > MAX_FILE_SIZE:
+		raise ValueError(f"File is too large to convert. The maximum supported size is {MAX_FILE_SIZE // (1024 * 1024)}MB.")
+	try:
+		image_data = await image.read()
+	except discord.HTTPException as e:
+		logger.error(f"Failed to download attachment {image.filename}: {e}")
+		raise ValueError("The image could not be downloaded from Discord.")
+	def encode() -> BytesIO:
+		with tempfile.TemporaryDirectory() as tempdir:
+			input_path = path.join(tempdir, f"input.{file_extension}")
+			output_path = path.join(tempdir, "output.gif")
+			with open(input_path, "wb") as f:
+				f.write(image_data)
+			try:
+				subprocess.run(
+					[
+						"ffmpeg",
+						"-hide_banner",
+						"-loglevel", "error",
+						"-i", input_path,
+						"-filter_complex",
+						"[0:v]format=rgba,split[a][b];"
+						"[a]palettegen=max_colors=256[p];"
+						"[b][p]paletteuse=dither=sierra2_4a",
+						"-loop", "0",
+						"-y",
+						output_path,
+					],
+					check=True,
+					capture_output=True,
+					text=True,
+					timeout=60,
+				)
+			except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+				stderr = e.stderr.decode(errors="replace") if isinstance(e.stderr, bytes) else e.stderr
+				logger.error(f"ffmpeg failed to convert {image.filename}: {stderr or e}")
+				raise ValueError("The image could not be converted. It may be corrupt or in a format ffmpeg cannot decode.")
+			except FileNotFoundError:
+				logger.error("ffmpeg was not found, image conversion is unavailable")
+				raise ValueError("Image conversion is currently unavailable.")
+			with open(output_path, "rb") as file:
+				return BytesIO(file.read())
+	gif_data = await asyncio.to_thread(encode)
+	if len(gif_data.getbuffer()) > MAX_FILE_SIZE:
+		raise ValueError("The converted GIF is too large to upload.")
 	return discord.File(gif_data, filename="PECK_bot_converted.gif")
 def demarkdownify(text:str):
 	replace_list = ["_", "*", "#", "~", "`", "|"]
