@@ -107,8 +107,7 @@ async def convertImageToGif(image:discord.Attachment) -> discord.File:
 					timeout=60,
 				)
 			except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
-				stderr = e.stderr.decode(errors="replace") if isinstance(e.stderr, bytes) else e.stderr
-				logger.error(f"ffmpeg failed to convert {image.filename}: {stderr or e}")
+				logger.error(f"ffmpeg failed to convert {image.filename}: {e.stderr or e}")
 				raise ValueError("The image could not be converted. It may be corrupt or in a format ffmpeg cannot decode.")
 			except FileNotFoundError:
 				logger.error("ffmpeg was not found, image conversion is unavailable")
