@@ -3,7 +3,7 @@ if __name__ == "__main__":
 import discord, logging, re
 from discord.ext import commands
 from typing import TYPE_CHECKING
-from datetime import datetime, UTC
+from datetime import datetime, UTC, time, timedelta
 from psutil import virtual_memory, Process as psutilProcess
 from psutil._common import bytes2human
 if __name__ == "__main__":
@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 # owner_only, officer_only, members_only, debug_only
 from utils.bot import ChannelIDs, RoleIDs
 import utils.generic as genericUtil
-#import utils.time as timeUtil
+import utils.time as timeUtil
 import utils.wt as wtUtil
 
 # "utils.generic", "utils.time", "utils.wt"
@@ -341,6 +341,34 @@ class NormalCog(commands.Cog):
 		else:
 			await interaction.edit_original_response(content="User not found")
 	# endregion
+
+	@discord.app_commands.command()
+	async def deepseek_peak(self, interaction: discord.Interaction):
+		"""Determines whether currently it is on- or off-peak for Deepseek:tm: API token usage"""
+		peak_times = (
+			( time(hour=1, tzinfo=UTC), time(hour=4, tzinfo=UTC) ),
+			( time(hour=6, tzinfo=UTC), time(hour=10, tzinfo=UTC) )
+		)
+		rn = datetime.now(UTC)
+		next_peak_start = datetime.combine(rn.date(), peak_times[0][0])
+
+		for peak_start, peak_end in peak_times:
+			if peak_start <= rn.timetz() <= peak_end:
+				await interaction.response.send_message(
+					content=f"We are currently in peak time\nPeak time ends {timeUtil.discord_timestamp(datetime.combine(rn.date(), peak_end), type=timeUtil.timestampTypes.RELATIVE)}", 
+					ephemeral=True
+				)
+				return
+			if rn.timetz() < peak_start and next_peak_start.timetz() < rn.timetz():
+				next_peak_start = datetime.combine(rn.date(), peak_start)
+
+		if next_peak_start.timetz() < rn.timetz():
+			next_peak_start = datetime.combine((rn + timedelta(days=1)).date(), peak_times[0][0])
+
+		await interaction.response.send_message(
+			content=f"We are currently in off-peak time\nPeak time starts {timeUtil.discord_timestamp(next_peak_start, type=timeUtil.timestampTypes.RELATIVE)}", 
+			ephemeral=True
+		)
 
 async def setup(bot:'Bot'):
 	await bot.add_cog(NormalCog(bot))
