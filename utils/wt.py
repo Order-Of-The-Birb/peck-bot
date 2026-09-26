@@ -1,6 +1,5 @@
 from __future__ import annotations
 import logging, requests, re, threading
-from playwright.async_api import async_playwright, Page as aPage
 from bs4 import BeautifulSoup
 from urllib.parse import quote
 from json import loads
@@ -15,8 +14,10 @@ if __name__ == "__main__":
 	sys_path.append(path.abspath(path.join(path.dirname(__file__), '..')))
 from utils.time import discord_timestamp, sqb_brackets, timestampTypes
 from utils.generic import httperror
+from utils.resources import browser_slot
 if TYPE_CHECKING:
 	from utils.bot import Bot
+	from playwright.async_api import Page as aPage
 logger = logging.getLogger(__name__)
 
 headers = {
@@ -93,14 +94,24 @@ class SQBData:
 	def fetch_data(cls) -> SQBData | None:
 		obj = None
 		def checkPage(pagenum:int):
-			while True:
-				response = requests.get(f"https://warthunder.com/en/community/getclansleaderboard/dif/_hist/page/{pagenum}/sort/dr_era5")
-				if response.status_code == 429: sleep(1)
-				else: break
-			if not response.ok:
-				logger.error(f"page number {pagenum} returned HTTP error {response.status_code} ({httperror(response)})")
+			for attempt in range(3):
+				try:
+					with requests.get(f"https://warthunder.com/en/community/getclansleaderboard/dif/_hist/page/{pagenum}/sort/dr_era5", timeout=(5, 15)) as response:
+						if response.status_code == 429:
+							if attempt < 2:
+								sleep(1)
+							continue
+						if not response.ok:
+							logger.error(f"page number {pagenum} returned HTTP error {response.status_code} ({httperror(response)})")
+							return
+						data = loads(response.text)
+					break
+				except requests.RequestException:
+					logger.exception(f"Failed to fetch leaderboard page {pagenum}")
+					return
+			else:
+				logger.error(f"Leaderboard page {pagenum} remained rate limited after 3 attempts")
 				return
-			data = loads(response.text)
 			if data["status"] != "ok":
 				logger.error(f"Page status returned {data["status"]}, with message '{data["msg"]}'")
 				return None
@@ -123,6 +134,12 @@ class SQBData:
 			pagenum += 5
 			sleep(0.5)
 class Squadron:
+	class Stats:
+		def __init__(self, air_kills:int, ground_kills:int, deaths:int, time:str):
+			self.air_kills = air_kills
+			self.ground_kills = ground_kills
+			self.deaths = deaths
+			self.time = time
 	class Member:
 		def __init__(self, data:tuple):
 			self.name:str = data[1]
@@ -160,8 +177,11 @@ class Squadron:
 		else:
 			content = await page.content()
 		soup = BeautifulSoup(content, "html.parser")
-		divs = [i.text.strip() for i in soup.find("div", {"class":"squadrons-members__table"}).find_all("div", {"class":"squadrons-members__grid-item"})[6:]]
-		self.members = tuple(self.Member(divs[i:i+6]) for i in range(0, len(divs), 6))
+		try:
+			divs = [i.text.strip() for i in soup.find("div", {"class":"squadrons-members__table"}).find_all("div", {"class":"squadrons-members__grid-item"})[6:]]
+			self.members = tuple(self.Member(divs[i:i+6]) for i in range(0, len(divs), 6))
+		finally:
+			soup.decompose()
 	async def updateStats(self, page:aPage|None=None):
 		if page is None:
 			async with self.openPage() as page:
@@ -170,24 +190,26 @@ class Squadron:
 		else:
 			content = await page.content()
 		soup = BeautifulSoup(content, "html.parser")
-		top = soup.find("div", {"class":"squadrons-profile__header-wrapper"})
-		_sqb_stats = top.find("div", {"class":"squadrons-profile__header-stat"}).find_all("ul")[1].find_all("li", {"class":"squadrons-stat__item-value"})[1:]
-		class sqb_stats:
-			def __init__(self):
-				self.air_kills = int(_sqb_stats[0].text.strip())
-				self.ground_kills = int(_sqb_stats[1].text.strip())
-				self.deaths = int(_sqb_stats[2].text.strip())
-				self.time = _sqb_stats[3].text.strip()
-		self.sqb = sqb_stats()
-		squadron_rating = top.find("div", {"class":"squadrons-profile__header-aside"}).find("div", {"class":"squadrons-counter__count-wrapper"}).find_all("div", {"class":"squadrons-counter__item"})
-		if (sqb_rating := re.search(r"\d+", squadron_rating[0].text)) is None:
-			logger.debug("Failed to obtain SQB rating")
-		else:
-			self.sqb_rating = int(sqb_rating.group(0).strip())
-		if (activity := re.search(r"\d+", squadron_rating[1].text)) is None:
-			logger.debug("Failed to obtain activity")
-		else:
-			self.activity = int(activity.group(0).strip())
+		try:
+			top = soup.find("div", {"class":"squadrons-profile__header-wrapper"})
+			_sqb_stats = top.find("div", {"class":"squadrons-profile__header-stat"}).find_all("ul")[1].find_all("li", {"class":"squadrons-stat__item-value"})[1:]
+			self.sqb = self.Stats(
+				int(_sqb_stats[0].text.strip()),
+				int(_sqb_stats[1].text.strip()),
+				int(_sqb_stats[2].text.strip()),
+				_sqb_stats[3].text.strip()
+			)
+			squadron_rating = top.find("div", {"class":"squadrons-profile__header-aside"}).find("div", {"class":"squadrons-counter__count-wrapper"}).find_all("div", {"class":"squadrons-counter__item"})
+			if (sqb_rating := re.search(r"\d+", squadron_rating[0].text)) is None:
+				logger.debug("Failed to obtain SQB rating")
+			else:
+				self.sqb_rating = int(sqb_rating.group(0).strip())
+			if (activity := re.search(r"\d+", squadron_rating[1].text)) is None:
+				logger.debug("Failed to obtain activity")
+			else:
+				self.activity = int(activity.group(0).strip())
+		finally:
+			soup.decompose()
 	async def updateInfo(self, page:aPage|None=None):
 		if page is None:
 			async with self.openPage() as page:
@@ -206,21 +228,26 @@ class Squadron:
 		self.creation_date = datetime.strptime(squadron_info.find("div", {"class":"squadrons-info__meta-item--date"}).text.strip().removeprefix("date of creation: "), "%d.%m.%Y")
 	@asynccontextmanager
 	async def openPage(self):
-		async with async_playwright() as p:
+		from playwright.async_api import async_playwright
+		async with browser_slot, async_playwright() as p:
+			browser = None
 			try:
 				browser = await p.firefox.launch(headless=True)
 				context = await browser.new_context(ignore_https_errors=True)
-				# Disable images (performance + CF friendliness)
-				await context.route("**/*", lambda route: (route.abort() if route.request.resource_type == "image" else route.continue_()))
-				page = await context.new_page()
-				await page.goto(self.URL, wait_until="domcontentloaded")
-				yield page
+				try:
+					# Disable images (performance + CF friendliness)
+					await context.route("**/*", lambda route: (route.abort() if route.request.resource_type == "image" else route.continue_()))
+					page = await context.new_page()
+					await page.goto(self.URL, wait_until="domcontentloaded")
+					yield page
+				finally:
+					await context.close()
 			except Exception:
 				self._logger.exception("An error occurred in the page")
 				raise
 			finally:
-				await context.close()
-				await browser.close()
+				if browser is not None:
+					await browser.close()
 @cache
 def _parse_sqb_weeks() -> list[dict[str, datetime|float]]:
 	URL = "https://forum.warthunder.com/t/season-schedule-for-squadron-battles/4446"
@@ -301,6 +328,7 @@ def normalizeUsername(name: str) -> str|None:
 	if not match: return None
 	return match.group(1)
 async def userInReplay(username:str, replay_id:int|str, login:'Bot.GaijinLogin') -> bool:
+	from playwright.async_api import async_playwright
 	username = normalizeUsername(username)
 	if isinstance(replay_id, str):
 		replay_id = int(replay_id, 16 if any(c in "abcdefABCDEF" for c in replay_id) else 10) # convert from HEX to DEC
@@ -314,23 +342,25 @@ async def userInReplay(username:str, replay_id:int|str, login:'Bot.GaijinLogin')
 			await route.abort()
 			return
 		await route.continue_()
-	async with async_playwright() as p:
+	async with browser_slot, async_playwright() as p:
 		browser = await p.firefox.launch(headless=__name__ != "__main__")
-		context = await browser.new_context(ignore_https_errors=True)
 		try:
-			await context.route("**/*", block_images)
-			page = await context.new_page()
-			await page.goto(f"https://warthunder.com/en/tournament/replay/{replay_id}", wait_until="domcontentloaded")
-			await login_and_prepare(page)
-			await page.wait_for_function(
-				"location.hostname.includes('warthunder.com')",
-				timeout=30000
-			)
-			await page.wait_for_selector("div#wtVueApp", timeout=15000)
-			await page.wait_for_load_state("networkidle")
-			html = await page.content()
+			context = await browser.new_context(ignore_https_errors=True)
+			try:
+				await context.route("**/*", block_images)
+				page = await context.new_page()
+				await page.goto(f"https://warthunder.com/en/tournament/replay/{replay_id}", wait_until="domcontentloaded")
+				await login_and_prepare(page)
+				await page.wait_for_function(
+					"location.hostname.includes('warthunder.com')",
+					timeout=30000
+				)
+				await page.wait_for_selector("div#wtVueApp", timeout=15000)
+				await page.wait_for_load_state("networkidle")
+				html = await page.content()
+			finally:
+				await context.close()
 		finally:
-			await context.close()
 			await browser.close()
 	soup = BeautifulSoup(html, 'html.parser')
 	teams = soup.select("div[class*='_resultItemNames_1umbu_']", limit=2)

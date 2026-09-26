@@ -127,22 +127,27 @@ class Listeners(commands.Cog):
 			), None)
 			if subject is None:
 				return
-			subject_clips_links:list[discord.Attachment] = []
-			async for _message in subject.history(limit=None, oldest_first=True):
-				subject_clips_links.extend(_message.attachments)
 			if self.bot.timeouts["clip"].isTimedOut(message.author.id):
 				expire_time = _cooldown_expire_time(self.bot.timeouts["clip"], message.author.id)
 				if expire_time is None:
 					expire_time = datetime.now(UTC) + timedelta(minutes=5)
 				await message.reply(f"You are under cooldown. It will expire {timeUtil.discord_timestamp(expire_time, "R")}", delete_after=5)
 				return
+			self.bot.timeouts["clip"].add(message.author.id)
+			clip_urls:list[str] = []
+			part = 0
+			async for clip_message in subject.history(limit=None, oldest_first=True):
+				for attachment in clip_message.attachments:
+					# The next attachment proves this is a multipart reply.
+					if len(clip_urls) == 10:
+						part += 1
+						await message.reply(f"Part {part}:\n{"\n".join(clip_urls)}", mention_author=False)
+						clip_urls.clear()
+					clip_urls.append(attachment.url)
+			if part:
+				await message.reply(f"Part {part+1}:\n{"\n".join(clip_urls)}", mention_author=False)
 			else:
-				self.bot.timeouts["clip"].add(message.author.id)
-			if len(subject_clips_links) > 10:
-				for num, i in enumerate(range(0, len(subject_clips_links), 10)):
-					await message.reply(f"Part {num+1}:\n{"\n".join([i.url for i in subject_clips_links[i-10:i]])}", mention_author=False)
-			else:
-				await message.reply(f"Here you go\n{"\n".join([i.url for i in subject_clips_links])}", mention_author=False)
+				await message.reply(f"Here you go\n{"\n".join(clip_urls)}", mention_author=False)
 			return
 		elif any(i in message.content.lower() for i in ["updoot", "downdoot", "upvote", "downvote"]):
 			updoot_msg = message.reference if message.reference else message

@@ -1,7 +1,7 @@
 if __name__ == "__main__":
 	raise Exception("Start the program from the main process")
 import logging, discord
-from random import choice
+from random import randrange
 from sys import modules as sysmodules
 from threading import Lock
 from importlib import reload
@@ -119,8 +119,9 @@ class Bot(commands.Bot):
 			self.email = getenv("WT_LOGIN_EMAIL")
 			self.password = getenv("WT_LOGIN_PASS")
 	class _SquadVC:
-		channels:list['SquadVCData'] = []
-		checkDelay:int = 0
+		def __init__(self):
+			self.channels:list['Bot._SquadVC.SquadVCData'] = []
+			self.checkDelay:int = 0
 		class SquadVCData:
 			_id:int
 			last_seen_person_time:float
@@ -273,14 +274,17 @@ class Bot(commands.Bot):
 	async def random_propaganda(self) -> str:
 		"""Selects a random propaganda post and returns with its URL"""
 		propaganda_ch = self.get_channel(self.channelIDs[ChannelIDs.PROPAGANDA])
-		messages = [
-			j.url 
-			async for i in propaganda_ch.history(limit=None) 
-			for j in i.attachments
-		]
-		if not messages: 
+		selected_url = None
+		attachment_count = 0
+		async for message in propaganda_ch.history(limit=None):
+			for attachment in message.attachments:
+				attachment_count += 1
+				# Each attachment has the same chance without retaining the history.
+				if randrange(attachment_count) == 0:
+					selected_url = attachment.url
+		if selected_url is None:
 			raise LookupError("No propaganda posts found")
-		return choice(messages)
+		return selected_url
 	@staticmethod
 	def toDiscordTimestamp(dt_obj:datetime) -> discord.app_commands.Timestamp:
 		return discord.app_commands.Timestamp(year=dt_obj.year, month=dt_obj.month, day=dt_obj.day, hour=dt_obj.hour, minute=dt_obj.minute, second=dt_obj.second, tzinfo=dt_obj.tzinfo)

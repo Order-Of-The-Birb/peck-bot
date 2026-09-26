@@ -112,6 +112,9 @@ async def convertImageToGif(image:discord.Attachment) -> discord.File:
 			except FileNotFoundError:
 				logger.error("ffmpeg was not found, image conversion is unavailable")
 				raise ValueError("Image conversion is currently unavailable.")
+			# Reject oversized output before allocating a buffer for the whole GIF.
+			if path.getsize(output_path) > MAX_FILE_SIZE:
+				raise ValueError("The converted GIF is too large to upload.")
 			with open(output_path, "rb") as file:
 				return BytesIO(file.read())
 	gif_data = await asyncio.to_thread(encode)

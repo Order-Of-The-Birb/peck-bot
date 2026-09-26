@@ -159,9 +159,11 @@ class UserRepository(list["UserRepository.User"]):
 					if connection_attempts >= 10*60:
 						raise ConnectionRefusedError("Establishing connection to database timed out.")
 			r.raise_for_status()
-			if r.json()["data"] == []:
+			page = r.json()["data"]
+			if not page:
 				break
-			self.extend(self.User(self.__base_url, self.__api_token, **item) for item in r.json()["data"])
+			self.extend(self.User(self.__base_url, self.__api_token, **item) for item in page)
+			del page
 			i += 1
 		logger.info("Refreshed user cache")
 	def add_user(self, gaijin_id:int, username:str, status:Status=Status.UNVERIFIED, discord_id:int|None=None, timezone:int|None=None, joindate:date|None=None, initiator:int|None=None):
