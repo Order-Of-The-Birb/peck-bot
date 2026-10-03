@@ -1,6 +1,6 @@
 if __name__ == "__main__":
 	raise Exception("Start the program from the main process")
-import logging, discord
+import asyncio, logging, discord
 from discord.ext import commands, tasks
 from datetime import datetime, timedelta, UTC, time
 from typing import TYPE_CHECKING
@@ -24,15 +24,20 @@ class Tasks(commands.Cog):
 		self.logger.setLevel(bot.logLevel)
 		self.lastPing = datetime.now(UTC)-timedelta(hours=1)
 		self.bot.squadVC.checkDelay = vc_check_delay
-		autostartFunctions:tuple[tasks.Loop] = (
+		self._background_loops:tuple[tasks.Loop] = (
 			self.planner_check_loop,
 			self.vc_check_user,
 			self.sqb_post,
 			self.ping_users_task
 		)
-		for func in autostartFunctions:
+		for func in self._background_loops:
 			_ = func.start()
 		self.logger.debug(f"{self.__class__.__name__} initialized")
+	async def cog_unload(self):
+		running = [loop.get_task() for loop in self._background_loops if loop.get_task() is not None]
+		for loop in self._background_loops:
+			loop.cancel()
+		await asyncio.gather(*running, return_exceptions=True)
 	@commands.Cog.listener()
 	async def on_error(self, ctx, error: Exception) -> None:
 		self.logger.error(f"An error occured in a task", exc_info=True, stacklevel=2)
@@ -82,7 +87,11 @@ class Tasks(commands.Cog):
 		self.logger.debug("Running sqb_post")
 		await self.bot.wait_until_ready()
 		self.pings_cnt = 0
-		data = wtUtil.SQBData.fetch_data()
+		try:
+			data = await asyncio.to_thread(wtUtil.SQBData.fetch_data)
+		except wtUtil.SQBLookupError:
+			self.logger.exception("SQB stats lookup failed; skipping this post until the next scheduled run")
+			return
 		if data is None: return
 		embed = discord.Embed(title=f"SQB Stats of {data.tag} {data.name}", color=0xFF0000)
 		embed.add_field(name="Leaderboard ranking", value=data.pos+1)

@@ -59,7 +59,7 @@ class NormalCog(commands.Cog):
 			)
 			def __init__(self, parent:'NormalCog'):
 				self.parent = parent
-				super().__init__()
+				super().__init__(timeout=15 * 60)
 			async def on_submit(self, interaction: discord.Interaction):
 				await interaction.response.defer(thinking=True, ephemeral=True)
 				await self.parent.bot.squadron.updateMembers()
@@ -211,7 +211,7 @@ class NormalCog(commands.Cog):
 			def __init__(self, bot:'Bot'):
 				self.bot = bot
 				self._logger = logging.getLogger(__name__)
-				super().__init__()
+				super().__init__(timeout=15 * 60)
 			async def on_submit(self, interaction: discord.Interaction):
 				await interaction.response.defer(thinking=True, ephemeral=True)
 				REPLAY_URL_REGEX = re.compile(r"^https://warthunder\.com/[a-z]{2}/tournament/replay/\d+$")
@@ -254,6 +254,7 @@ class NormalCog(commands.Cog):
 		memstat = virtual_memory()
 		embed.add_field(name="Bot RAM usage", value=bytes2human(psutilProcess().memory_info().rss))
 		embed.add_field(name="System RAM usage", value=f"{bytes2human(memstat.used)}/{bytes2human(memstat.total)}", inline=False)
+		embed.add_field(name="System RAM available", value=bytes2human(memstat.available), inline=False)
 		embed.set_author(name="PECK bot", icon_url=self.bot.iconURL)
 		await interaction.response.send_message(embed=embed)
 
