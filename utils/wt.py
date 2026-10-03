@@ -24,6 +24,23 @@ logger = logging.getLogger(__name__)
 headers = {
 	"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36 OPR/117.0.0.0"
 }
+@asynccontextmanager
+async def _closing_browser_resource(resource):
+	"""Preserve the first error or cancellation; surface close failures after successful use."""
+	failed = False
+	try:
+		yield resource
+	except BaseException:
+		failed = True
+		raise
+	finally:
+		try:
+			await resource.close()
+		except BaseException:
+			if not failed:
+				raise
+			logger.warning("Could not close %s while handling an earlier error", type(resource).__name__, exc_info=True)
+
 class SQBLookupError(LookupError):
 	"""The leaderboard could not be searched reliably for the squadron."""
 
@@ -115,9 +132,12 @@ class SQBData:
 				raise SQBLookupError(f"Leaderboard page {pagenum} remained rate limited after 3 attempts")
 			if not isinstance(data, dict) or data.get("status") != "ok" or not isinstance(data.get("data"), list):
 				raise SQBLookupError(f"Leaderboard page {pagenum} returned an unsuccessful or invalid response")
+			# A later match is usable; malformed rows make a negative result inconclusive.
+			invalid_squadron = False
 			for squadron in data["data"]:
 				if not isinstance(squadron, dict) or type(squadron.get("_id")) is not int:
-					raise SQBLookupError(f"Leaderboard page {pagenum} contained an invalid squadron")
+					invalid_squadron = True
+					continue
 				if squadron["_id"] == 1061551:
 					if type(squadron.get("pos")) is not int or not all(isinstance(squadron.get(key), str) for key in ("tag", "name")):
 						raise SQBLookupError(f"Leaderboard page {pagenum} contained invalid squadron details")
@@ -126,6 +146,8 @@ class SQBData:
 					if not isinstance(stats, dict) or any(type(stats.get(key, 0)) is not int for key in stat_keys):
 						raise SQBLookupError(f"Leaderboard page {pagenum} contained invalid squadron statistics")
 					return cls(squadron, pagenum)
+			if invalid_squadron:
+				raise SQBLookupError(f"Leaderboard page {pagenum} contained an invalid squadron")
 			return None
 		errors:list[tuple[int, Exception]] = []
 		with ThreadPoolExecutor(max_workers=5) as executor:
@@ -243,24 +265,13 @@ class Squadron:
 	async def openPage(self):
 		from playwright.async_api import async_playwright
 		async with browser_slot, async_playwright() as p:
-			browser = None
-			try:
-				browser = await p.firefox.launch(headless=True)
-				context = await browser.new_context(ignore_https_errors=True)
-				try:
+			async with _closing_browser_resource(await p.firefox.launch(headless=True)) as browser:
+				async with _closing_browser_resource(await browser.new_context(ignore_https_errors=True)) as context:
 					# Disable images (performance + CF friendliness)
 					await context.route("**/*", lambda route: (route.abort() if route.request.resource_type == "image" else route.continue_()))
 					page = await context.new_page()
 					await page.goto(self.URL, wait_until="domcontentloaded")
 					yield page
-				finally:
-					await context.close()
-			except Exception:
-				self._logger.exception("An error occurred in the page")
-				raise
-			finally:
-				if browser is not None:
-					await browser.close()
 @cache
 def _parse_sqb_weeks() -> list[dict[str, datetime|float]]:
 	URL = "https://forum.warthunder.com/t/season-schedule-for-squadron-battles/4446"
@@ -356,10 +367,8 @@ async def userInReplay(username:str, replay_id:int|str, login:'Bot.GaijinLogin')
 			return
 		await route.continue_()
 	async with browser_slot, async_playwright() as p:
-		browser = await p.firefox.launch(headless=__name__ != "__main__")
-		try:
-			context = await browser.new_context(ignore_https_errors=True)
-			try:
+		async with _closing_browser_resource(await p.firefox.launch(headless=__name__ != "__main__")) as browser:
+			async with _closing_browser_resource(await browser.new_context(ignore_https_errors=True)) as context:
 				await context.route("**/*", block_images)
 				page = await context.new_page()
 				await page.goto(f"https://warthunder.com/en/tournament/replay/{replay_id}", wait_until="domcontentloaded")
@@ -371,10 +380,6 @@ async def userInReplay(username:str, replay_id:int|str, login:'Bot.GaijinLogin')
 				await page.wait_for_selector("div#wtVueApp", timeout=15000)
 				await page.wait_for_load_state("networkidle")
 				html = await page.content()
-			finally:
-				await context.close()
-		finally:
-			await browser.close()
 	soup = BeautifulSoup(html, 'html.parser')
 	teams = soup.select("div[class*='_resultItemNames_1umbu_']", limit=2)
 	if len(teams) < 2:

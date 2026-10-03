@@ -42,9 +42,12 @@ class genericButtons(discord.ui.View):
 				yes.disabled = True
 				if deny:
 					no.disabled = True
-				if removeButtonsAfter:
-					await interaction.edit_original_response(view=None)
 				self.stop()
+				if removeButtonsAfter:
+					try:
+						await interaction.edit_original_response(view=None)
+					except discord.NotFound:
+						pass # The callback may already have deleted the message.
 		async def no_callback(interaction: discord.Interaction):
 			await interaction.response.edit_message(view=self)
 			if self.requiredPerms is not None and not all(getattr(interaction.user.guild_permissions, p[0], False) for p in self.requiredPerms if p[1]):
@@ -55,9 +58,12 @@ class genericButtons(discord.ui.View):
 			if result:
 				yes.disabled = True
 				no.disabled = True
-				if removeButtonsAfter:
-					await interaction.edit_original_response(view=None)
 				self.stop()
+				if removeButtonsAfter:
+					try:
+						await interaction.edit_original_response(view=None)
+					except discord.NotFound:
+						pass # The callback may already have deleted the message.
 		yes.callback = yes_callback
 		no.callback = no_callback
 		self.add_item(yes)
