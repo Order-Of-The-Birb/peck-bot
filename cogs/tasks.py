@@ -87,7 +87,11 @@ class Tasks(commands.Cog):
 		self.logger.debug("Running sqb_post")
 		await self.bot.wait_until_ready()
 		self.pings_cnt = 0
-		data = await asyncio.to_thread(wtUtil.SQBData.fetch_data)
+		try:
+			data = await asyncio.to_thread(wtUtil.SQBData.fetch_data)
+		except wtUtil.SQBLookupError:
+			self.logger.exception("SQB stats lookup failed; skipping this post until the next scheduled run")
+			return
 		if data is None: return
 		embed = discord.Embed(title=f"SQB Stats of {data.tag} {data.name}", color=0xFF0000)
 		embed.add_field(name="Leaderboard ranking", value=data.pos+1)

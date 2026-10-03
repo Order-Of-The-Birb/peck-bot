@@ -1,5 +1,6 @@
 from __future__ import annotations
-import logging, requests, re, threading
+import logging, requests, re
+from concurrent.futures import ThreadPoolExecutor
 from bs4 import BeautifulSoup
 from urllib.parse import quote
 from json import loads
@@ -23,6 +24,9 @@ logger = logging.getLogger(__name__)
 headers = {
 	"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36 OPR/117.0.0.0"
 }
+class SQBLookupError(LookupError):
+	"""The leaderboard could not be searched reliably for the squadron."""
+
 class SQBData:
 	class _astat:
 		dr_era5:int
@@ -92,7 +96,7 @@ class SQBData:
 		self.astat = self._astat(content.get("astat"))
 	@classmethod
 	def fetch_data(cls) -> SQBData | None:
-		obj = None
+		"""Return a match, or None after a complete search; raise on lookup failure."""
 		def checkPage(pagenum:int):
 			for attempt in range(3):
 				try:
@@ -102,37 +106,46 @@ class SQBData:
 								sleep(1)
 							continue
 						if not response.ok:
-							logger.error(f"page number {pagenum} returned HTTP error {response.status_code} ({httperror(response)})")
-							return
+							raise SQBLookupError(f"Leaderboard page {pagenum} returned HTTP {response.status_code}")
 						data = loads(response.text)
 					break
-				except requests.RequestException:
-					logger.exception(f"Failed to fetch leaderboard page {pagenum}")
-					return
+				except (requests.RequestException, ValueError) as error:
+					raise SQBLookupError(f"Failed to read leaderboard page {pagenum}") from error
 			else:
-				logger.error(f"Leaderboard page {pagenum} remained rate limited after 3 attempts")
-				return
-			if data["status"] != "ok":
-				logger.error(f"Page status returned {data["status"]}, with message '{data["msg"]}'")
-				return None
+				raise SQBLookupError(f"Leaderboard page {pagenum} remained rate limited after 3 attempts")
+			if not isinstance(data, dict) or data.get("status") != "ok" or not isinstance(data.get("data"), list):
+				raise SQBLookupError(f"Leaderboard page {pagenum} returned an unsuccessful or invalid response")
 			for squadron in data["data"]:
-				if isinstance(squadron, dict) and squadron.get("_id") == 1061551:
-					nonlocal obj
-					if obj is None:
-						obj = cls(squadron, pagenum)
-						return
-		pagenum = 1
-		while True: # 20 places per page
-			if pagenum > 50:
-				return None # Not found in first 20*50=1000 places
-			threads = [threading.Thread(None, checkPage, args=(i,)) for i in range(pagenum, pagenum+5)] # 5 pages per thread batch, 20*5=100 places per check
-			[i.start() for i in threads]
-			while any(i.is_alive() for i in threads):
-				sleep(0.1)
-			if obj is not None:
-				return obj
-			pagenum += 5
-			sleep(0.5)
+				if not isinstance(squadron, dict) or type(squadron.get("_id")) is not int:
+					raise SQBLookupError(f"Leaderboard page {pagenum} contained an invalid squadron")
+				if squadron["_id"] == 1061551:
+					if type(squadron.get("pos")) is not int or not all(isinstance(squadron.get(key), str) for key in ("tag", "name")):
+						raise SQBLookupError(f"Leaderboard page {pagenum} contained invalid squadron details")
+					stats = squadron.get("astat")
+					stat_keys = ("dr_era5_hist", "deaths_hist", "gkills_hist", "battles_hist", "akills_hist")
+					if not isinstance(stats, dict) or any(type(stats.get(key, 0)) is not int for key in stat_keys):
+						raise SQBLookupError(f"Leaderboard page {pagenum} contained invalid squadron statistics")
+					return cls(squadron, pagenum)
+			return None
+		errors:list[tuple[int, Exception]] = []
+		with ThreadPoolExecutor(max_workers=5) as executor:
+			for pagenum in range(1, 51, 5): # 20 places per page, five pages per batch
+				pages = {page: executor.submit(checkPage, page) for page in range(pagenum, pagenum+5)}
+				obj = None
+				for page, future in pages.items():
+					try:
+						result = future.result()
+						if result is not None:
+							obj = result
+					except Exception as error:
+						errors.append((page, error))
+				if obj is not None:
+					return obj
+				if pagenum < 46:
+					sleep(0.5)
+		if errors:
+			raise SQBLookupError(f"SQB lookup was incomplete; leaderboard pages failed: {', '.join(str(page) for page, _ in errors)}") from errors[0][1]
+		return None # Not found in the first 20*50=1000 places
 class Squadron:
 	class Stats:
 		def __init__(self, air_kills:int, ground_kills:int, deaths:int, time:str):

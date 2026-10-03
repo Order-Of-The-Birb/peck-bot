@@ -131,23 +131,39 @@ class Listeners(commands.Cog):
 				expire_time = _cooldown_expire_time(self.bot.timeouts["clip"], message.author.id)
 				if expire_time is None:
 					expire_time = datetime.now(UTC) + timedelta(minutes=5)
-				await message.reply(f"You are under cooldown. It will expire {timeUtil.discord_timestamp(expire_time, "R")}", delete_after=5)
+				try:
+					await message.reply(f"You are under cooldown. It will expire {timeUtil.discord_timestamp(expire_time, "R")}", delete_after=5)
+				except discord.HTTPException:
+					self.logger.exception("Could not send clip cooldown reply to user %s", message.author.id)
 				return
 			self.bot.timeouts["clip"].add(message.author.id)
 			clip_urls:list[str] = []
 			part = 0
-			async for clip_message in subject.history(limit=None, oldest_first=True):
-				for attachment in clip_message.attachments:
-					# The next attachment proves this is a multipart reply.
-					if len(clip_urls) == 10:
-						part += 1
-						await message.reply(f"Part {part}:\n{"\n".join(clip_urls)}", mention_author=False)
-						clip_urls.clear()
-					clip_urls.append(attachment.url)
-			if part:
-				await message.reply(f"Part {part+1}:\n{"\n".join(clip_urls)}", mention_author=False)
-			else:
-				await message.reply(f"Here you go\n{"\n".join(clip_urls)}", mention_author=False)
+			try:
+				async for clip_message in subject.history(limit=None, oldest_first=True):
+					for attachment in clip_message.attachments:
+						# The next attachment proves this is a multipart reply.
+						if len(clip_urls) == 10:
+							await message.reply(f"Part {part+1}:\n{"\n".join(clip_urls)}", mention_author=False)
+							part += 1
+							clip_urls.clear()
+						clip_urls.append(attachment.url)
+				if part:
+					await message.reply(f"Part {part+1}:\n{"\n".join(clip_urls)}", mention_author=False)
+				elif clip_urls:
+					await message.reply(f"Here you go\n{"\n".join(clip_urls)}", mention_author=False)
+				else:
+					await message.reply("No clips found.", mention_author=False)
+			except discord.HTTPException:
+				self.logger.exception("Clip request failed for user %s in source channel %s after %s completed batches", message.author.id, subject.id, part)
+				failure = "I couldn't complete this clip request."
+				if part:
+					failure += " The results above are incomplete."
+				failure += " Please try again later. This attempt counts toward your cooldown."
+				try:
+					await message.reply(failure, mention_author=False)
+				except discord.HTTPException:
+					self.logger.exception("Could not send clip failure reply to user %s", message.author.id)
 			return
 		elif any(i in message.content.lower() for i in ["updoot", "downdoot", "upvote", "downvote"]):
 			updoot_msg = message.reference if message.reference else message
