@@ -6,6 +6,7 @@ from urllib.parse import quote
 from json import loads
 from time import sleep
 from datetime import datetime, UTC
+from email.utils import parsedate_to_datetime
 from functools import cache
 from typing import TYPE_CHECKING
 from contextlib import asynccontextmanager
@@ -43,6 +44,21 @@ async def _closing_browser_resource(resource):
 
 class SQBLookupError(LookupError):
 	"""The leaderboard could not be searched reliably for the squadron."""
+
+class _SQBRateLimitError(SQBLookupError):
+	"""The lookup must stop requesting further leaderboard pages."""
+
+def _retry_after_seconds(value:str) -> float:
+	value = (value or "").strip()
+	if re.fullmatch(r"[0-9]+", value):
+		return float(value)
+	try:
+		retry_at = parsedate_to_datetime(value)
+		if retry_at.tzinfo is None:
+			retry_at = retry_at.replace(tzinfo=UTC)
+		return max(0.0, (retry_at - datetime.now(UTC)).total_seconds())
+	except (TypeError, ValueError, OverflowError):
+		return 1.0
 
 class SQBData:
 	class _astat:
@@ -115,21 +131,26 @@ class SQBData:
 	def fetch_data(cls) -> SQBData | None:
 		"""Return a match, or None after a complete search; raise on lookup failure."""
 		def checkPage(pagenum:int):
+			retry_sleep_remaining = 5.0 # Total retry sleep budget for this page.
 			for attempt in range(3):
 				try:
 					with requests.get(f"https://warthunder.com/en/community/getclansleaderboard/dif/_hist/page/{pagenum}/sort/dr_era5", timeout=(5, 15)) as response:
-						if response.status_code == 429:
-							if attempt < 2:
-								sleep(1)
-							continue
-						if not response.ok:
-							raise SQBLookupError(f"Leaderboard page {pagenum} returned HTTP {response.status_code}")
-						data = loads(response.text)
-					break
+						if response.status_code != 429:
+							if not response.ok:
+								raise SQBLookupError(f"Leaderboard page {pagenum} returned HTTP {response.status_code}")
+							data = loads(response.text)
+							break
+						retry_after = response.headers.get("Retry-After", "")
 				except (requests.RequestException, ValueError) as error:
 					raise SQBLookupError(f"Failed to read leaderboard page {pagenum}") from error
-			else:
-				raise SQBLookupError(f"Leaderboard page {pagenum} remained rate limited after 3 attempts")
+				if attempt == 2:
+					raise _SQBRateLimitError(f"Leaderboard page {pagenum} remained rate limited after 3 attempts")
+				delay = _retry_after_seconds(retry_after)
+				if delay > retry_sleep_remaining:
+					raise _SQBRateLimitError(f"Leaderboard page {pagenum} requested a retry delay beyond its remaining sleep budget")
+				retry_sleep_remaining -= delay
+				if delay > 0:
+					sleep(delay)
 			if not isinstance(data, dict) or data.get("status") != "ok" or not isinstance(data.get("data"), list):
 				raise SQBLookupError(f"Leaderboard page {pagenum} returned an unsuccessful or invalid response")
 			# A later match is usable; malformed rows make a negative result inconclusive.
@@ -150,6 +171,7 @@ class SQBData:
 				raise SQBLookupError(f"Leaderboard page {pagenum} contained an invalid squadron")
 			return None
 		errors:list[tuple[int, Exception]] = []
+		rate_limit_error = None
 		with ThreadPoolExecutor(max_workers=5) as executor:
 			for pagenum in range(1, 51, 5): # 20 places per page, five pages per batch
 				pages = {page: executor.submit(checkPage, page) for page in range(pagenum, pagenum+5)}
@@ -161,12 +183,17 @@ class SQBData:
 							obj = result
 					except Exception as error:
 						errors.append((page, error))
+						if isinstance(error, _SQBRateLimitError):
+							rate_limit_error = error
 				if obj is not None:
 					return obj
+				# A match in this batch wins; otherwise respect the endpoint's backoff.
+				if rate_limit_error is not None:
+					break
 				if pagenum < 46:
 					sleep(0.5)
 		if errors:
-			raise SQBLookupError(f"SQB lookup was incomplete; leaderboard pages failed: {', '.join(str(page) for page, _ in errors)}") from errors[0][1]
+			raise SQBLookupError(f"SQB lookup was incomplete; leaderboard pages failed: {', '.join(str(page) for page, _ in errors)}") from (rate_limit_error or errors[0][1])
 		return None # Not found in the first 20*50=1000 places
 class Squadron:
 	class Stats:
@@ -253,14 +280,17 @@ class Squadron:
 		else:
 			content = await page.content()
 		soup = BeautifulSoup(content, "html.parser")
-		top = soup.find("div", {"class":"squadrons-profile__header-wrapper"})
-		squadron_info = top.find("div", {"class":"squadrons-info__content-wrapper"})
-		squadron_name_tag = squadron_info.find("div", {"class":"squadrons-info__title"}).text.strip().split(" ")
-		self.squadron_name = " ".join(squadron_name_tag[1:])
-		self.squadron_tag = squadron_name_tag[0]
-		self.member_count = int(squadron_info.find("div", {"class":"squadrons-info__meta-item"}).text.strip().removeprefix("Number of players: "))
-		self.squadron_description = squadron_info.find("div", {"class":"squadrons-info__description--full"}).text.strip()
-		self.creation_date = datetime.strptime(squadron_info.find("div", {"class":"squadrons-info__meta-item--date"}).text.strip().removeprefix("date of creation: "), "%d.%m.%Y")
+		try:
+			top = soup.find("div", {"class":"squadrons-profile__header-wrapper"})
+			squadron_info = top.find("div", {"class":"squadrons-info__content-wrapper"})
+			squadron_name_tag = squadron_info.find("div", {"class":"squadrons-info__title"}).text.strip().split(" ")
+			self.squadron_name = " ".join(squadron_name_tag[1:])
+			self.squadron_tag = squadron_name_tag[0]
+			self.member_count = int(squadron_info.find("div", {"class":"squadrons-info__meta-item"}).text.strip().removeprefix("Number of players: "))
+			self.squadron_description = squadron_info.find("div", {"class":"squadrons-info__description--full"}).text.strip()
+			self.creation_date = datetime.strptime(squadron_info.find("div", {"class":"squadrons-info__meta-item--date"}).text.strip().removeprefix("date of creation: "), "%d.%m.%Y")
+		finally:
+			soup.decompose()
 	@asynccontextmanager
 	async def openPage(self):
 		from playwright.async_api import async_playwright

@@ -21,12 +21,6 @@ __reload_deps__ = ("utils.generic", "utils.time")
 sqb_member_last_seen = datetime.now(UTC)-timedelta(minutes=30)
 
 
-def _cooldown_expire_time(timeout_store, user_id: int) -> datetime | None:
-	oldest = timeout_store.getOldest(user_id)
-	if oldest is None:
-		return None
-	return oldest + timedelta(minutes=5)
-
 class Listeners(commands.Cog):
 	def __init__(self, bot:'Bot'):
 		self.bot = bot
@@ -128,11 +122,13 @@ class Listeners(commands.Cog):
 			if subject is None:
 				return
 			if self.bot.timeouts["clip"].isTimedOut(message.author.id):
-				expire_time = _cooldown_expire_time(self.bot.timeouts["clip"], message.author.id)
+				expire_time = self.bot.timeouts["clip"].getExpireTime(message.author.id)
 				if expire_time is None:
-					expire_time = datetime.now(UTC) + timedelta(minutes=5)
+					cooldown_reply = "You are under cooldown. Please try again later."
+				else:
+					cooldown_reply = f"You are under cooldown. It will expire {timeUtil.discord_timestamp(expire_time, "R")}"
 				try:
-					await message.reply(f"You are under cooldown. It will expire {timeUtil.discord_timestamp(expire_time, "R")}", delete_after=5)
+					await message.reply(cooldown_reply, delete_after=5)
 				except discord.HTTPException:
 					self.logger.exception("Could not send clip cooldown reply to user %s", message.author.id)
 				return
