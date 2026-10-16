@@ -1,6 +1,6 @@
 if __name__ == "__main__":
 	raise Exception("Start the program from the main process")
-import logging, discord
+import asyncio, logging, discord
 from discord.ext import commands
 from typing import TYPE_CHECKING
 from sys import modules as sysmodules
@@ -10,6 +10,8 @@ from cogs import EXTENSIONS
 # ChannelIDs, RoleIDs, CategoryIDs
 # owner_only, officer_only, members_only, debug_only
 from utils.bot import owner_only
+from utils.memory import process_memory, cache_counts
+from psutil._common import bytes2human
 #import utils.generic as genericUtil
 #import utils.time as timeUtil
 #import utils.wt as wtUtil
@@ -31,6 +33,27 @@ class OwnerCog(commands.Cog):
 		self.logger = logging.getLogger(__name__)
 		self.logger.setLevel(bot.logLevel)
 		self.logger.debug(f"{self.__class__.__name__} initialized")
+
+	@discord.app_commands.command(name="memory", description="Inspect bot RAM and cache counts")
+	@owner_only()
+	async def memory(self, interaction: discord.Interaction):
+		await interaction.response.defer(ephemeral=True)
+		memory = await asyncio.to_thread(process_memory)
+		counts = cache_counts(self.bot)
+		lines = [f"Python RSS: {bytes2human(memory['rss'])}"]
+		for key, label in (("uss", "Python private RAM (USS)"), ("pss", "Python proportional RAM (PSS)"),
+			("cgroup_current", "Cgroup RAM (includes file cache)"), ("cgroup_peak", "Cgroup peak")):
+			if memory[key] is not None:
+				lines.append(f"{label}: {bytes2human(memory[key])}")
+		lines.append(f"Child processes: {memory['children']} / {bytes2human(memory['children_rss'])} summed RSS")
+		if memory["children_pss"] is not None:
+			lines.append(f"Child proportional RAM (PSS): {bytes2human(memory['children_pss'])}")
+		lines.append(f"Cached messages: {counts['messages']} / {counts['message_limit']}")
+		lines.append(f"Cached members: {counts['cached_members']} / {counts['members']}")
+		lines.append(f"Open forms: {counts['modals']}; view message keys: {counts['view_message_keys']}")
+		lines.append(f"Repository users: {counts['repository_users']}; async tasks: {len(asyncio.all_tasks())}")
+		lines.append("RSS includes shared pages; child RSS totals can double-count shared memory.")
+		await interaction.edit_original_response(content="\n".join(lines))
 
 	@discord.app_commands.command()
 	@owner_only()

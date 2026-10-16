@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 # ChannelIDs, RoleIDs, CategoryIDs
 # owner_only, officer_only, members_only, debug_only
 #from utils.bot import 
-import utils.generic as genericUtil
+#import utils.generic as genericUtil
 #import utils.time as timeUtil
 import utils.wt as wtUtil
 
@@ -67,6 +67,12 @@ class AdminCog(commands.Cog):
 	async def say(self, interaction:discord.Interaction, content:str, file:discord.Attachment = None, respond_to_id:str = None):
 		"""Says the content as the bot, Only usable as the owner of the bot"""
 		await interaction.response.defer(ephemeral=True)
+		if "-" in respond_to_id: # copy message ID returns <channelID>-<messageID> when holding shift
+			parts = respond_to_id.split("-")
+			if parts[0] != str(interaction.channel_id):
+				await interaction.edit_original_response(content="Channel ID for message doesn't match the current channel")
+				return
+			respond_to_id = parts[1]
 		await interaction.channel.send(
 			content=content.replace("\\n", "\n"), 
 			file=(await file.to_file()) if file else None, 
@@ -193,6 +199,16 @@ class SQBStanceQuestionView(discord.ui.View):
 		else:
 			await interaction.followup.send(f"Failed to update your participation status. Please contact mahoyoshino (discord ID {self.bot.owner_id}) to resolve this issue", ephemeral=True)
 
+	
+	@discord.app_commands.command()
+	@discord.app_commands.guild_only()
+	@discord.app_commands.default_permissions(administrator=True)
+	async def check_news(self, interaction:discord.Interaction):
+		await interaction.response.defer(thinking=True, ephemeral=True)
+		await self.bot.newsAPI.periodicNewsPing(True)
+		await self.bot.newsAPI.periodicChLogPing(True)
+		await interaction.edit_original_response(content="Checked for news and changelogs")
+		
 async def setup(bot: 'Bot'):
 	cog = AdminCog(bot)
 	await bot.add_cog(cog)

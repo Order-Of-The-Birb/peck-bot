@@ -1,6 +1,6 @@
 if __name__ == "__main__":
 	raise Exception("Start the program from the main process")
-import discord, logging, re
+import asyncio, discord, logging, re
 from discord.ext import commands
 from datetime import datetime, timedelta, UTC
 from typing import TYPE_CHECKING
@@ -35,9 +35,22 @@ class VcCog(commands.GroupCog, group_name="squad"):
 				if self.SQUADVC_RE.fullmatch(i.name) is not None and i.name.lower() not in ["squad 1", "squad 2"]
 			]
 			self.logger.debug("VCInit over")
-		self.bot.runtime.create_task(vcInit())
+		self._init_task = self.bot.runtime.create_task(vcInit(), name="peck-squad-vc-init")
+		self._init_task.add_done_callback(self._init_done)
 		self.logger.debug(f"{self.__class__.__name__} initialized")
-	
+
+	def _init_done(self, task:asyncio.Task):
+		try:
+			task.result()
+		except asyncio.CancelledError:
+			pass
+		except Exception:
+			self.logger.exception("Failed to initialize squad voice channels")
+
+	async def cog_unload(self):
+		self._init_task.cancel()
+		await asyncio.gather(self._init_task, return_exceptions=True)
+
 	@discord.app_commands.command(name="create")
 	@discord.app_commands.guild_only()
 	@discord.app_commands.choices(size=[

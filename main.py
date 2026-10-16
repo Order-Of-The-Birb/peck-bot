@@ -41,9 +41,14 @@ def main():
 	loop = asyncio.new_event_loop()
 	asyncio.set_event_loop(loop)
 	global bot
+	intents = discord.Intents.all()
+	# No features consume member presence or typing updates. Keep member and
+	# message caches for role lookups and edit/delete audit logs.
+	intents.presences = False
+	intents.typing = False
 	bot = Bot(
 		command_prefix='.pt ',
-		intents=discord.Intents.all(),
+		intents=intents,
 		debug=debug,
 		runtime=loop,
 		logLevel=logger.getEffectiveLevel()

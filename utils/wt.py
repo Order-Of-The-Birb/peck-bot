@@ -1,11 +1,12 @@
 from __future__ import annotations
-import logging, requests, re, threading
-from playwright.async_api import async_playwright, Page as aPage
+import logging, requests, re
+from concurrent.futures import ThreadPoolExecutor
 from bs4 import BeautifulSoup
 from urllib.parse import quote
 from json import loads
 from time import sleep
 from datetime import datetime, UTC
+from email.utils import parsedate_to_datetime
 from functools import cache
 from typing import TYPE_CHECKING
 from contextlib import asynccontextmanager
@@ -15,13 +16,50 @@ if __name__ == "__main__":
 	sys_path.append(path.abspath(path.join(path.dirname(__file__), '..')))
 from utils.time import discord_timestamp, sqb_brackets, timestampTypes
 from utils.generic import httperror
+from utils.resources import browser_slot
 if TYPE_CHECKING:
 	from utils.bot import Bot
+	from playwright.async_api import Page as aPage
 logger = logging.getLogger(__name__)
 
 headers = {
 	"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36 OPR/117.0.0.0"
 }
+@asynccontextmanager
+async def _closing_browser_resource(resource):
+	"""Preserve the first error or cancellation; surface close failures after successful use."""
+	failed = False
+	try:
+		yield resource
+	except BaseException:
+		failed = True
+		raise
+	finally:
+		try:
+			await resource.close()
+		except BaseException:
+			if not failed:
+				raise
+			logger.warning("Could not close %s while handling an earlier error", type(resource).__name__, exc_info=True)
+
+class SQBLookupError(LookupError):
+	"""The leaderboard could not be searched reliably for the squadron."""
+
+class _SQBRateLimitError(SQBLookupError):
+	"""The lookup must stop requesting further leaderboard pages."""
+
+def _retry_after_seconds(value:str) -> float:
+	value = (value or "").strip()
+	if re.fullmatch(r"[0-9]+", value):
+		return float(value)
+	try:
+		retry_at = parsedate_to_datetime(value)
+		if retry_at.tzinfo is None:
+			retry_at = retry_at.replace(tzinfo=UTC)
+		return max(0.0, (retry_at - datetime.now(UTC)).total_seconds())
+	except (TypeError, ValueError, OverflowError):
+		return 1.0
+
 class SQBData:
 	class _astat:
 		dr_era5:int
@@ -91,38 +129,79 @@ class SQBData:
 		self.astat = self._astat(content.get("astat"))
 	@classmethod
 	def fetch_data(cls) -> SQBData | None:
-		obj = None
+		"""Return a match, or None after a complete search; raise on lookup failure."""
 		def checkPage(pagenum:int):
-			while True:
-				response = requests.get(f"https://warthunder.com/en/community/getclansleaderboard/dif/_hist/page/{pagenum}/sort/dr_era5")
-				if response.status_code == 429: sleep(1)
-				else: break
-			if not response.ok:
-				logger.error(f"page number {pagenum} returned HTTP error {response.status_code} ({httperror(response)})")
-				return
-			data = loads(response.text)
-			if data["status"] != "ok":
-				logger.error(f"Page status returned {data["status"]}, with message '{data["msg"]}'")
-				return None
+			retry_sleep_remaining = 5.0 # Total retry sleep budget for this page.
+			for attempt in range(3):
+				try:
+					with requests.get(f"https://warthunder.com/en/community/getclansleaderboard/dif/_hist/page/{pagenum}/sort/dr_era5", timeout=(5, 15)) as response:
+						if response.status_code != 429:
+							if not response.ok:
+								raise SQBLookupError(f"Leaderboard page {pagenum} returned HTTP {response.status_code}")
+							data = loads(response.text)
+							break
+						retry_after = response.headers.get("Retry-After", "")
+				except (requests.RequestException, ValueError) as error:
+					raise SQBLookupError(f"Failed to read leaderboard page {pagenum}") from error
+				if attempt == 2:
+					raise _SQBRateLimitError(f"Leaderboard page {pagenum} remained rate limited after 3 attempts")
+				delay = _retry_after_seconds(retry_after)
+				if delay > retry_sleep_remaining:
+					raise _SQBRateLimitError(f"Leaderboard page {pagenum} requested a retry delay beyond its remaining sleep budget")
+				retry_sleep_remaining -= delay
+				if delay > 0:
+					sleep(delay)
+			if not isinstance(data, dict) or data.get("status") != "ok" or not isinstance(data.get("data"), list):
+				raise SQBLookupError(f"Leaderboard page {pagenum} returned an unsuccessful or invalid response")
+			# A later match is usable; malformed rows make a negative result inconclusive.
+			invalid_squadron = False
 			for squadron in data["data"]:
-				if isinstance(squadron, dict) and squadron.get("_id") == 1061551:
-					nonlocal obj
-					if obj is None:
-						obj = cls(squadron, pagenum)
-						return
-		pagenum = 1
-		while True: # 20 places per page
-			if pagenum > 50:
-				return None # Not found in first 20*50=1000 places
-			threads = [threading.Thread(None, checkPage, args=(i,)) for i in range(pagenum, pagenum+5)] # 5 pages per thread batch, 20*5=100 places per check
-			[i.start() for i in threads]
-			while any(i.is_alive() for i in threads):
-				sleep(0.1)
-			if obj is not None:
-				return obj
-			pagenum += 5
-			sleep(0.5)
+				if not isinstance(squadron, dict) or type(squadron.get("_id")) is not int:
+					invalid_squadron = True
+					continue
+				if squadron["_id"] == 1061551:
+					if type(squadron.get("pos")) is not int or not all(isinstance(squadron.get(key), str) for key in ("tag", "name")):
+						raise SQBLookupError(f"Leaderboard page {pagenum} contained invalid squadron details")
+					stats = squadron.get("astat")
+					stat_keys = ("dr_era5_hist", "deaths_hist", "gkills_hist", "battles_hist", "akills_hist")
+					if not isinstance(stats, dict) or any(type(stats.get(key, 0)) is not int for key in stat_keys):
+						raise SQBLookupError(f"Leaderboard page {pagenum} contained invalid squadron statistics")
+					return cls(squadron, pagenum)
+			if invalid_squadron:
+				raise SQBLookupError(f"Leaderboard page {pagenum} contained an invalid squadron")
+			return None
+		errors:list[tuple[int, Exception]] = []
+		rate_limit_error = None
+		with ThreadPoolExecutor(max_workers=5) as executor:
+			for pagenum in range(1, 51, 5): # 20 places per page, five pages per batch
+				pages = {page: executor.submit(checkPage, page) for page in range(pagenum, pagenum+5)}
+				obj = None
+				for page, future in pages.items():
+					try:
+						result = future.result()
+						if result is not None:
+							obj = result
+					except Exception as error:
+						errors.append((page, error))
+						if isinstance(error, _SQBRateLimitError):
+							rate_limit_error = error
+				if obj is not None:
+					return obj
+				# A match in this batch wins; otherwise respect the endpoint's backoff.
+				if rate_limit_error is not None:
+					break
+				if pagenum < 46:
+					sleep(0.5)
+		if errors:
+			raise SQBLookupError(f"SQB lookup was incomplete; leaderboard pages failed: {', '.join(str(page) for page, _ in errors)}") from (rate_limit_error or errors[0][1])
+		return None # Not found in the first 20*50=1000 places
 class Squadron:
+	class Stats:
+		def __init__(self, air_kills:int, ground_kills:int, deaths:int, time:str):
+			self.air_kills = air_kills
+			self.ground_kills = ground_kills
+			self.deaths = deaths
+			self.time = time
 	class Member:
 		def __init__(self, data:tuple):
 			self.name:str = data[1]
@@ -160,8 +239,11 @@ class Squadron:
 		else:
 			content = await page.content()
 		soup = BeautifulSoup(content, "html.parser")
-		divs = [i.text.strip() for i in soup.find("div", {"class":"squadrons-members__table"}).find_all("div", {"class":"squadrons-members__grid-item"})[6:]]
-		self.members = tuple(self.Member(divs[i:i+6]) for i in range(0, len(divs), 6))
+		try:
+			divs = [i.text.strip() for i in soup.find("div", {"class":"squadrons-members__table"}).find_all("div", {"class":"squadrons-members__grid-item"})[6:]]
+			self.members = tuple(self.Member(divs[i:i+6]) for i in range(0, len(divs), 6))
+		finally:
+			soup.decompose()
 	async def updateStats(self, page:aPage|None=None):
 		if page is None:
 			async with self.openPage() as page:
@@ -170,24 +252,26 @@ class Squadron:
 		else:
 			content = await page.content()
 		soup = BeautifulSoup(content, "html.parser")
-		top = soup.find("div", {"class":"squadrons-profile__header-wrapper"})
-		_sqb_stats = top.find("div", {"class":"squadrons-profile__header-stat"}).find_all("ul")[1].find_all("li", {"class":"squadrons-stat__item-value"})[1:]
-		class sqb_stats:
-			def __init__(self):
-				self.air_kills = int(_sqb_stats[0].text.strip())
-				self.ground_kills = int(_sqb_stats[1].text.strip())
-				self.deaths = int(_sqb_stats[2].text.strip())
-				self.time = _sqb_stats[3].text.strip()
-		self.sqb = sqb_stats()
-		squadron_rating = top.find("div", {"class":"squadrons-profile__header-aside"}).find("div", {"class":"squadrons-counter__count-wrapper"}).find_all("div", {"class":"squadrons-counter__item"})
-		if (sqb_rating := re.search(r"\d+", squadron_rating[0].text)) is None:
-			logger.debug("Failed to obtain SQB rating")
-		else:
-			self.sqb_rating = int(sqb_rating.group(0).strip())
-		if (activity := re.search(r"\d+", squadron_rating[1].text)) is None:
-			logger.debug("Failed to obtain activity")
-		else:
-			self.activity = int(activity.group(0).strip())
+		try:
+			top = soup.find("div", {"class":"squadrons-profile__header-wrapper"})
+			_sqb_stats = top.find("div", {"class":"squadrons-profile__header-stat"}).find_all("ul")[1].find_all("li", {"class":"squadrons-stat__item-value"})[1:]
+			self.sqb = self.Stats(
+				int(_sqb_stats[0].text.strip()),
+				int(_sqb_stats[1].text.strip()),
+				int(_sqb_stats[2].text.strip()),
+				_sqb_stats[3].text.strip()
+			)
+			squadron_rating = top.find("div", {"class":"squadrons-profile__header-aside"}).find("div", {"class":"squadrons-counter__count-wrapper"}).find_all("div", {"class":"squadrons-counter__item"})
+			if (sqb_rating := re.search(r"\d+", squadron_rating[0].text)) is None:
+				logger.debug("Failed to obtain SQB rating")
+			else:
+				self.sqb_rating = int(sqb_rating.group(0).strip())
+			if (activity := re.search(r"\d+", squadron_rating[1].text)) is None:
+				logger.debug("Failed to obtain activity")
+			else:
+				self.activity = int(activity.group(0).strip())
+		finally:
+			soup.decompose()
 	async def updateInfo(self, page:aPage|None=None):
 		if page is None:
 			async with self.openPage() as page:
@@ -196,31 +280,28 @@ class Squadron:
 		else:
 			content = await page.content()
 		soup = BeautifulSoup(content, "html.parser")
-		top = soup.find("div", {"class":"squadrons-profile__header-wrapper"})
-		squadron_info = top.find("div", {"class":"squadrons-info__content-wrapper"})
-		squadron_name_tag = squadron_info.find("div", {"class":"squadrons-info__title"}).text.strip().split(" ")
-		self.squadron_name = " ".join(squadron_name_tag[1:])
-		self.squadron_tag = squadron_name_tag[0]
-		self.member_count = int(squadron_info.find("div", {"class":"squadrons-info__meta-item"}).text.strip().removeprefix("Number of players: "))
-		self.squadron_description = squadron_info.find("div", {"class":"squadrons-info__description--full"}).text.strip()
-		self.creation_date = datetime.strptime(squadron_info.find("div", {"class":"squadrons-info__meta-item--date"}).text.strip().removeprefix("date of creation: "), "%d.%m.%Y")
+		try:
+			top = soup.find("div", {"class":"squadrons-profile__header-wrapper"})
+			squadron_info = top.find("div", {"class":"squadrons-info__content-wrapper"})
+			squadron_name_tag = squadron_info.find("div", {"class":"squadrons-info__title"}).text.strip().split(" ")
+			self.squadron_name = " ".join(squadron_name_tag[1:])
+			self.squadron_tag = squadron_name_tag[0]
+			self.member_count = int(squadron_info.find("div", {"class":"squadrons-info__meta-item"}).text.strip().removeprefix("Number of players: "))
+			self.squadron_description = squadron_info.find("div", {"class":"squadrons-info__description--full"}).text.strip()
+			self.creation_date = datetime.strptime(squadron_info.find("div", {"class":"squadrons-info__meta-item--date"}).text.strip().removeprefix("date of creation: "), "%d.%m.%Y")
+		finally:
+			soup.decompose()
 	@asynccontextmanager
 	async def openPage(self):
-		async with async_playwright() as p:
-			try:
-				browser = await p.firefox.launch(headless=True)
-				context = await browser.new_context(ignore_https_errors=True)
-				# Disable images (performance + CF friendliness)
-				await context.route("**/*", lambda route: (route.abort() if route.request.resource_type == "image" else route.continue_()))
-				page = await context.new_page()
-				await page.goto(self.URL, wait_until="domcontentloaded")
-				yield page
-			except Exception:
-				self._logger.exception("An error occurred in the page")
-				raise
-			finally:
-				await context.close()
-				await browser.close()
+		from playwright.async_api import async_playwright
+		async with browser_slot, async_playwright() as p:
+			async with _closing_browser_resource(await p.firefox.launch(headless=True)) as browser:
+				async with _closing_browser_resource(await browser.new_context(ignore_https_errors=True)) as context:
+					# Disable images (performance + CF friendliness)
+					await context.route("**/*", lambda route: (route.abort() if route.request.resource_type == "image" else route.continue_()))
+					page = await context.new_page()
+					await page.goto(self.URL, wait_until="domcontentloaded")
+					yield page
 @cache
 def _parse_sqb_weeks() -> list[dict[str, datetime|float]]:
 	URL = "https://forum.warthunder.com/t/season-schedule-for-squadron-battles/4446"
@@ -301,6 +382,7 @@ def normalizeUsername(name: str) -> str|None:
 	if not match: return None
 	return match.group(1)
 async def userInReplay(username:str, replay_id:int|str, login:'Bot.GaijinLogin') -> bool:
+	from playwright.async_api import async_playwright
 	username = normalizeUsername(username)
 	if isinstance(replay_id, str):
 		replay_id = int(replay_id, 16 if any(c in "abcdefABCDEF" for c in replay_id) else 10) # convert from HEX to DEC
@@ -314,24 +396,20 @@ async def userInReplay(username:str, replay_id:int|str, login:'Bot.GaijinLogin')
 			await route.abort()
 			return
 		await route.continue_()
-	async with async_playwright() as p:
-		browser = await p.firefox.launch(headless=__name__ != "__main__")
-		context = await browser.new_context(ignore_https_errors=True)
-		try:
-			await context.route("**/*", block_images)
-			page = await context.new_page()
-			await page.goto(f"https://warthunder.com/en/tournament/replay/{replay_id}", wait_until="domcontentloaded")
-			await login_and_prepare(page)
-			await page.wait_for_function(
-				"location.hostname.includes('warthunder.com')",
-				timeout=30000
-			)
-			await page.wait_for_selector("div#wtVueApp", timeout=15000)
-			await page.wait_for_load_state("networkidle")
-			html = await page.content()
-		finally:
-			await context.close()
-			await browser.close()
+	async with browser_slot, async_playwright() as p:
+		async with _closing_browser_resource(await p.firefox.launch(headless=__name__ != "__main__")) as browser:
+			async with _closing_browser_resource(await browser.new_context(ignore_https_errors=True)) as context:
+				await context.route("**/*", block_images)
+				page = await context.new_page()
+				await page.goto(f"https://warthunder.com/en/tournament/replay/{replay_id}", wait_until="domcontentloaded")
+				await login_and_prepare(page)
+				await page.wait_for_function(
+					"location.hostname.includes('warthunder.com')",
+					timeout=30000
+				)
+				await page.wait_for_selector("div#wtVueApp", timeout=15000)
+				await page.wait_for_load_state("networkidle")
+				html = await page.content()
 	soup = BeautifulSoup(html, 'html.parser')
 	teams = soup.select("div[class*='_resultItemNames_1umbu_']", limit=2)
 	if len(teams) < 2:

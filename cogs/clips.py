@@ -54,7 +54,7 @@ class ClipsCog(commands.GroupCog, group_name="clips"):
 				)
 			)
 			def __init__(self, bot:'Bot'):
-				super().__init__()
+				super().__init__(timeout=15 * 60)
 				self.bot = bot
 				self._logger = logging.getLogger(__name__)
 			async def on_submit(self, interaction:discord.Interaction):
@@ -133,7 +133,7 @@ class ClipsCog(commands.GroupCog, group_name="clips"):
 				)
 			)
 			def __init__(self, bot:'Bot'):
-				super().__init__()
+				super().__init__(timeout=15 * 60)
 				self.bot = bot
 				self._logger = logging.getLogger(__name__)
 			async def on_submit(self, interaction:discord.Interaction):
@@ -154,8 +154,10 @@ class ClipsCog(commands.GroupCog, group_name="clips"):
 					alias:str = interaction.message.content.split("\n")[1].strip('"').lower()
 					await interaction.message.delete()
 					await interaction.channel.edit(topic=(interaction.channel.topic+"\n" if interaction.channel.topic is not None else "")+f"{alias}")
+					return True
 				async def deny(interaction:discord.Interaction):
 					await interaction.message.delete()
+					return True
 				await channel.send(content=f"User '{interaction.user.name}' ({interaction.user.id}) suggested the following alias for user:\n\"{alias}\"\nAwaiting confirmation...", view=genericUtil.genericButtons(acceptFunc=accept, denyFunc=deny, acceptLabel="Add", denyLabel="Delete", timeout=None))
 				await interaction.edit_original_response(content=f"Uploaded alias for {selected_user}. Said alias will be accessible after admin confirmation.")
 		await interaction.response.send_modal(AddAlias(self.bot))

@@ -9,6 +9,7 @@ from bs4 import BeautifulSoup, Tag
 from pathlib import Path
 from discord import Embed
 from enum import Enum
+from re import search as re_search, IGNORECASE
 if __name__ == "__main__":
 	from os import path
 	from sys import path as sys_path
@@ -120,6 +121,8 @@ Changelogs news (webscraping): 'https://warthunder.com/en/game/changelog/'
 							) or
 							"black friday" in title
 						)
+					) or (
+						re_search("Meet the “[A-z0-9 ]+” Major Update!", title, IGNORECASE) is not None and self.pinned 
 					)
 				):
 				return self.ImportanceLevel.MAJOR
@@ -153,19 +156,25 @@ Changelogs news (webscraping): 'https://warthunder.com/en/game/changelog/'
 	lastPostedNewsID:int
 	lastPostedChLogsID:int
 	async def setID(self, ID:int|News=None, _type:Literal["News", "Changelogs"] = "News"):
-		self._logger.debug(f"Writing value {ID} for {_type}")
+		self._logger.debug(f"Writing value {ID if isinstance(ID, int) else ID.id} for {_type}")
 		if _type == "News":			keyValue = "lastPostedID"
 		elif _type == "Changelogs":	keyValue = "lastPostedChLogID"
 		else:
 			return self._logger.error(f"keyValue given is neither 'News' or 'Changelogs'. Instead it is '{_type}'")
+
 		with self.lock:
-			with open("modules/news.json", "r") as _:content = load(_)
+			with open("modules/news.json", "r") as _:
+				content = load(_)
 			if isinstance(ID, int):			content[keyValue] = ID
 			elif isinstance(ID, self.News): content[keyValue] = ID.id
 			else: return self._logger.error(f"ID given is neither type 'int' or 'News'. Instead it is '{type(ID)}'")
-			with open("modules/news.json", "w") as file: dump(content, file, indent=4)
-			if _type == "News":	self.lastPostedNewsID		 = content[keyValue]
-			else:				self.lastPostedChLogsID 	 = content[keyValue]
+
+			with open("modules/news.json", "w") as file: 
+				dump(content, file, indent=4)
+			if _type == "News":	
+				self.lastPostedNewsID = content[keyValue]
+			else:
+				self.lastPostedChLogsID = content[keyValue]
 		self._logger.debug("Data written.")
 	async def fetchNews(self) -> list[News]:
 		"""Fetches the latest news from the News API."""
@@ -221,7 +230,7 @@ Changelogs news (webscraping): 'https://warthunder.com/en/game/changelog/'
 		self.lastPostedNewsID = news[0].id
 		await self.setID(self.lastPostedNewsID)
 		return []
-	async def periodicNewsPing(self):
+	async def periodicNewsPing(self, return_after:bool = False):
 		await self.bot.wait_until_ready()
 		while True:
 			latest:list['NewsAPI.News'] = (await self.newsSincePost(self.lastPostedNewsID))[::-1]
@@ -231,8 +240,9 @@ Changelogs news (webscraping): 'https://warthunder.com/en/game/changelog/'
 					self.bot.dispatch("newsapi_post", news) 
 					self._logger.debug(f"Dispatched news id {news.id} to listener")
 				await self.setID(latest[-1])
+			if return_after: return
 			await asleep(self.__calcDelay__())
-	async def periodicChLogPing(self):
+	async def periodicChLogPing(self, return_after:bool = False):
 		await self.bot.wait_until_ready()
 		while True:
 			latest = await self.fetchLatestChLog()
@@ -241,6 +251,7 @@ Changelogs news (webscraping): 'https://warthunder.com/en/game/changelog/'
 				self.bot.dispatch("newsapi_post", latest) 
 				self._logger.debug(f"Dispatched changelog id {latest.id} to listener")
 				await self.setID(latest, _type="Changelogs")
+			if return_after: return
 			await asleep(self.__calcDelay__(True))
 	def __calcDelay__(self, isChangelogs:bool=False) -> int:
 		rn = datetime.now(UTC)
