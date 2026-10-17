@@ -153,7 +153,7 @@ class UserRepository(list["UserRepository.User"]):
 					r = get(self.__base_url+f"users?page={i}&per_page=100", headers={"accepts": "application/json"})
 					break
 				except ConnectionError:
-					logger.warning(f"Database API could not be reached. Retrying in {f"{connection_attempts//60} minute{"s" if connection_attempts//60 > 1 else ""} " if connection_attempts > 60 else ""}{connection_attempts%60} seconds")
+					logger.exception(f"Database API could not be reached. Retrying in {f"{connection_attempts//60} minute{"s" if connection_attempts//60 > 1 else ""} " if connection_attempts > 60 else ""}{connection_attempts%60} seconds")
 					sleep(connection_attempts)
 					connection_attempts = connection_attempts*2
 					if connection_attempts >= 10*60:
