@@ -16,6 +16,8 @@ from utils.bot import members_only, officer_only, ChannelIDs
 import utils.generic as genericUtil
 import utils.time as timeUtil
 import utils.wt as wtUtil
+import shared
+from modules import management
 
 # "utils.generic", "utils.time", "utils.wt"
 __reload_deps__ = ("utils.generic", "utils.time", "utils.wt")
@@ -199,10 +201,10 @@ class SQBCog(commands.GroupCog, group_name="sqb"):
 		elif dc_user is not None:	identifier = dc_user.id
 		else: return await interaction.edit_original_response(content="You must give me any user identifier.")
 		if isinstance(identifier, int):
-			user = self.bot.db.getByDID(identifier)
+			user = await management.get(discord_id=identifier)
 			user = user[0] if user else None
 		elif isinstance(identifier, str):
-			user = self.bot.db.getByName(identifier)
+			user = await management.get(username=identifier)
 		else:
 			raise ValueError(f"Invalid type given for identifier '{type(identifier)}'")
 		if user is None:
@@ -210,7 +212,7 @@ class SQBCog(commands.GroupCog, group_name="sqb"):
 			await interaction.edit_original_response(content=f"Could not find user '{identifier}' in the database")
 			return
 		current_br = wtUtil.get_sqb_br()
-		message = f"Hello {user.username}!\nYou have been drafted for SQB.\nThe current BR is {current_br.br if current_br else "Could not get BR data"}\n{await self.bot.random_propaganda()}"
+		message = f"Hello {user.username}!\nYou have been drafted for SQB.\nThe current BR is {current_br.br if current_br else "Could not get BR data"}\n{await genericUtil.random_propaganda(interaction.guild_id)}"
 		dc_user2 = self.bot.get_user(user.discord_id)
 		async def accept(interaction2:discord.Interaction):
 			await interaction2.followup.send(f"Splendid, please join <#{self.bot.channelIDs[ChannelIDs.SQB]}> to start participating!")
@@ -233,7 +235,7 @@ class SQBCog(commands.GroupCog, group_name="sqb"):
 		await interaction.response.defer(thinking=True)
 		if interaction.user.guild_permissions.pin_messages and pin: 
 			for i in (await interaction.channel.pins(limit=None)):
-				if i.content.startswith("Seasonal schedule for SQB:") and i.author.id in self.bot.botIDs:
+				if i.content.startswith("Seasonal schedule for SQB:") and i.author.id == self.bot.user.id:
 					await i.delete()
 					self.logger.debug("Pinned message found and deleted")
 					break
@@ -247,9 +249,7 @@ class SQBCog(commands.GroupCog, group_name="sqb"):
 		await interaction.edit_original_response(content=messageContent)
 		if interaction.user.guild_permissions.pin_messages and pin: 
 			await (await interaction.original_response()).pin(reason="Pinning SQB BR message")
-			def is_me(m:discord.Message):
-				return m.author == interaction.client.user
-			await interaction.channel.purge(limit=1, reason="Removing pin message", check=is_me)
+			await interaction.channel.purge(limit=1, reason="Removing pin message", check=lambda m: m.author == interaction.client.user)
 		elif not interaction.user.guild_permissions.pin_messages and pin:
 			await interaction.followup.send("You don't have permissions to pin messages, the message will be posted without pinning.", ephemeral=True)
 

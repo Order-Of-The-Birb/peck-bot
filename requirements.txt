@@ -8,3 +8,4 @@ playwright
 fastapi
 uvicorn
 requests
+matplotlib

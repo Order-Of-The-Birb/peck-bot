@@ -11,16 +11,15 @@ if TYPE_CHECKING:
 #import utils.generic as genericUtil
 #import utils.time as timeUtil
 #import utils.wt as wtUtil
+import shared
 
 # "utils.generic", "utils.time", "utils.wt"
 __reload_deps__ = ()
 
 class className(commands.GroupCog, group_name=""):
-	def __init__(self, bot:'Bot'):
-		self.bot = bot
+	def __init__(self):
 		self.logger = logging.getLogger(__name__)
-		self.logger.setLevel(bot.logLevel)
 		self.logger.debug(f"{self.__class__.__name__} initialized")
 
 async def setup(bot:'Bot'):
-	await bot.add_cog(className(bot))
+	await bot.add_cog(className())

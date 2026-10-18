@@ -14,6 +14,8 @@ from utils.bot import ChannelIDs, RoleIDs
 import utils.generic as genericUtil
 import utils.time as timeUtil
 #import utils.wt as wtUtil
+import shared
+from modules import management
 
 # "utils.generic", "utils.time", "utils.wt"
 __reload_deps__ = ("utils.generic", "utils.time")
@@ -25,7 +27,6 @@ class Listeners(commands.Cog):
 	def __init__(self, bot:'Bot'):
 		self.bot = bot
 		self.logger = logging.getLogger(__name__)
-		self.logger.setLevel(bot.logLevel)
 		self.last_disconnect: datetime | None = None
 		self.logger.debug(f"{self.__class__.__name__} initialized")
 	# region DEFAULT LISTENERS
@@ -70,7 +71,7 @@ class Listeners(commands.Cog):
 	# region Member
 	@commands.Cog.listener()
 	async def on_member_remove(self, member:discord.Member):
-		user = self.bot.db.getByDID(member.id)
+		user = management.get(discord_id=member.id)
 		if user:
 			user.sort(key=lambda x: x.joindate)
 			channel = self.bot.get_channel(self.bot.channelIDs[ChannelIDs.LOGS])
@@ -81,19 +82,13 @@ class Listeners(commands.Cog):
 			embed.add_field(name="Length of stay", value=f"{member.joined_at.strftime("%Y.%m.%d")}-{datetime.now(UTC).strftime("%Y.%m.%d")}")
 			await channel.send(embed=embed)
 			await self.bot.squadron.updateMembers()
-			for user in user:
-				user.status = self.bot.db.Status.EX_MEMBER
-				if self.bot.squadron.getMember(user.username) is None:
-					user.leave_info = self.bot.db.LeaveInfo.LEFT
-				else:
-					user.leave_info = self.bot.db.LeaveInfo.SERVER
-				user.push()
+
 	# endregion
 	# region Message
 	trevortimes:int = 0
 	@commands.Cog.listener()
 	async def on_message(self, message:discord.Message):
-		if message.author.id in self.bot.botIDs: return
+		if message.author.bot: return
 		if isinstance(message.channel, discord.DMChannel):
 			embed = discord.Embed(title=f"DM sent to PECK bot")
 			embed.add_field(name="", value=message.content, inline=True)
@@ -130,7 +125,7 @@ class Listeners(commands.Cog):
 				try:
 					await message.reply(cooldown_reply, delete_after=5)
 				except discord.HTTPException:
-					self.logger.exception("Could not send clip cooldown reply to user %s", message.author.id)
+					self.logger.exception(f"Could not send clip cooldown reply to user {message.author.id}")
 				return
 			self.bot.timeouts["clip"].add(message.author.id)
 			clip_urls:list[str] = []
@@ -151,7 +146,7 @@ class Listeners(commands.Cog):
 				else:
 					await message.reply("No clips found.", mention_author=False)
 			except discord.HTTPException:
-				self.logger.exception("Clip request failed for user %s in source channel %s after %s completed batches", message.author.id, subject.id, part)
+				self.logger.exception(f"Clip request failed for user {message.author.id} in source channel {subject.id} after {part} completed batches")
 				failure = "I couldn't complete this clip request."
 				if part:
 					failure += " The results above are incomplete."
@@ -159,7 +154,7 @@ class Listeners(commands.Cog):
 				try:
 					await message.reply(failure, mention_author=False)
 				except discord.HTTPException:
-					self.logger.exception("Could not send clip failure reply to user %s", message.author.id)
+					self.logger.exception(f"Could not send clip failure reply to user {message.author.id}")
 			return
 		elif any(i in message.content.lower() for i in ["updoot", "downdoot", "upvote", "downvote"]):
 			updoot_msg = message.reference if message.reference else message
@@ -167,7 +162,7 @@ class Listeners(commands.Cog):
 			await asyncio.sleep(0.2)
 			await updoot_msg.add_reaction(self.bot.get_emoji(1277999500262244362))
 		elif ("trevor" in message.content.lower()):
-			await message.channel.send("https://tenor.com/view/trevor-moment-discord-swag-meme-gif-20463477") 
+			await message.channel.send("https://cdn.discordapp.com/attachments/917952050883596309/1560956360349454426/trevor-moment.gif")
 			self.trevortimes += 1
 			self.logger.info(f"Trevor has been sent {self.trevortimes} times")
 	# endregion

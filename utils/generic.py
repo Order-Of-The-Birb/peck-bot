@@ -1,74 +1,12 @@
 import requests, aiohttp, asyncio, discord, logging, tempfile, re, subprocess
-from typing import TYPE_CHECKING, Protocol
+from random import randrange
 from os import path
 from io import BytesIO
 from json import loads
-if TYPE_CHECKING:
-	from utils.bot import Bot
+import shared
 
 MAX_FILE_SIZE = 8 * 1024 * 1024 # 8MB
 logger = logging.getLogger(__name__)
-class callbackProtocol(Protocol):
-	async def __call__(
-		self,
-		interaction: discord.Interaction,
-		**kwargs
-	) -> bool|None: ...
-class genericButtons(discord.ui.View):
-	def __init__(self, *, acceptFunc:callbackProtocol, denyFunc:callbackProtocol|None=None, timeout:int|None = 180, acceptLabel:str = "Yes", denyLabel:str="No", deny:bool=True, removeButtonsAfter:bool=False, requiredPerms:discord.Permissions|None=None, **kwargs):
-		self._logger = logging.getLogger(__name__)
-		if deny and denyFunc is None:
-			raise ValueError("deny=True requires denyFunc to be provided")
-		self.requiredPerms = requiredPerms
-		super().__init__(timeout=timeout)
-		yes = discord.ui.Button(
-			label=acceptLabel,
-			style=discord.ButtonStyle.green,
-			custom_id="accept"
-		)
-		no = discord.ui.Button(
-			label=denyLabel,
-			style=discord.ButtonStyle.red,
-			custom_id="deny"
-		)
-		async def yes_callback(interaction: discord.Interaction):
-			await interaction.response.edit_message(view=self)
-			if self.requiredPerms is not None and not all(getattr(interaction.user.guild_permissions, p[0], False) for p in self.requiredPerms if p[1]):
-				self._logger.warning(f"Accept attempt by: {interaction.user.name} ({interaction.user.id})")
-				await interaction.followup.send("You do not have the required permission to use this!", ephemeral=True)
-				return
-			result = await acceptFunc(interaction, **kwargs)
-			if result:
-				yes.disabled = True
-				if deny:
-					no.disabled = True
-				self.stop()
-				if removeButtonsAfter:
-					try:
-						await interaction.edit_original_response(view=None)
-					except discord.NotFound:
-						pass # The callback may already have deleted the message.
-		async def no_callback(interaction: discord.Interaction):
-			await interaction.response.edit_message(view=self)
-			if self.requiredPerms is not None and not all(getattr(interaction.user.guild_permissions, p[0], False) for p in self.requiredPerms if p[1]):
-				self._logger.warning(f"Deny attempt by: {interaction.user.name} ({interaction.user.id})")
-				await interaction.followup.send("You do not have the required permission to use this!", ephemeral=True)
-				return
-			result = await denyFunc(interaction, **kwargs)
-			if result:
-				yes.disabled = True
-				no.disabled = True
-				self.stop()
-				if removeButtonsAfter:
-					try:
-						await interaction.edit_original_response(view=None)
-					except discord.NotFound:
-						pass # The callback may already have deleted the message.
-		yes.callback = yes_callback
-		no.callback = no_callback
-		self.add_item(yes)
-		if deny and denyFunc is not None:
-			self.add_item(no)
 
 def httperror(response:requests.Response|aiohttp.ClientResponse) -> str:
 	if isinstance(response, aiohttp.ClientResponse):
@@ -191,3 +129,21 @@ async def medalDownload(share_url:str) -> discord.File:
 			)
 			return discord.File(output_path, filename="clip.mp4")
 # endregion
+
+async def random_propaganda(guild:int) -> str:
+	"""Selects a random propaganda post and returns with its URL"""
+	config = shared.GUILD_CONFIGS.get(guild)
+	if config is None:
+		return
+	propaganda_ch = shared.BOT.get_channel(config.channel_ids[shared.ChannelIDs.PROPAGANDA])
+	selected_url = None
+	attachment_count = 0
+	async for message in propaganda_ch.history(limit=None):
+		for attachment in message.attachments:
+			attachment_count += 1
+			# Each attachment has the same chance without retaining the history.
+			if randrange(attachment_count) == 0:
+				selected_url = attachment.url
+	if selected_url is None:
+		raise LookupError("No propaganda posts found")
+	return selected_url

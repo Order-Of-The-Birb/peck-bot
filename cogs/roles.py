@@ -17,6 +17,7 @@ from utils.bot import RoleIDs, ChannelIDs
 #import utils.generic as genericUtil
 #import utils.time as timeUtil
 #import utils.wt as wtUtil
+import modules.management as Management
 
 # "utils.generic", "utils.time", "utils.wt"
 __reload_deps__ = ()
@@ -45,7 +46,7 @@ class RolesCog(commands.GroupCog, group_name="role"):
 			await interaction.user.add_roles(pingrole)
 			await interaction.edit_original_response(content=f"You have been given the {pingrole.mention} role.")
 		elif role == 2:
-			main_profile = self.bot.db.getByDID(interaction.user.id)
+			main_profile = await Management.getByDiscord(interaction.user.id)
 			if not main_profile:
 				await interaction.edit_original_response(content="You aren't registered in the squadron member list.")
 				return

@@ -11,6 +11,8 @@ if TYPE_CHECKING:
 #import utils.generic as genericUtil
 #import utils.time as timeUtil
 #import utils.wt as wtUtil
+from modules import management
+import shared
 
 # "utils.generic", "utils.time", "utils.wt"
 __reload_deps__ = ()
@@ -19,7 +21,6 @@ class ContextMenuCog(commands.Cog):
 	def __init__(self, bot:'Bot'):
 		self.bot = bot
 		self.logger = logging.getLogger(__name__)
-		self.logger.setLevel(bot.logLevel)
 		self.logger.debug(f"{self.__class__.__name__} initialized")
 		self.menuItems = (
 			discord.app_commands.ContextMenu(
@@ -29,7 +30,7 @@ class ContextMenuCog(commands.Cog):
 		)
 
 	async def get_wt_name(self, interaction:discord.Interaction, user:discord.Member):
-		associatedAccounts = self.bot.db.getByDID(user.id)
+		associatedAccounts = await management.get(discord_id=user.id)
 		if not associatedAccounts:
 			await interaction.response.send_message("Could not find any accounts associated with the user.", ephemeral=True)
 			return

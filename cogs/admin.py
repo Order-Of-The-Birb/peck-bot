@@ -10,10 +10,10 @@ if TYPE_CHECKING:
 #from utils.bot import 
 #import utils.generic as genericUtil
 #import utils.time as timeUtil
-import utils.wt as wtUtil
+import shared
 
 # "utils.generic", "utils.time", "utils.wt"
-__reload_deps__ = ("utils.wt", "utils.generic")
+__reload_deps__ = ()
 
 class AdminCog(commands.Cog):
 	bot:'Bot'
@@ -28,7 +28,7 @@ class AdminCog(commands.Cog):
 			self.logger.warning(f"Unauthorized request\n\tCommand:{interaction.command.name}\t\nUser:{interaction.user.name}({interaction.user.id})\n\tReason: Admin command in DMs")
 			await interaction.response.send_message("You need to execute this command in a server (Required to check for permissions)")
 			return False
-		if any(i.id in self.bot.authorityRoleIDs for i in interaction.user.roles):
+		if any(i.id in shared.GUILD_CONFIG.authorityRoleIDs for i in interaction.user.roles):
 			return True
 		self.logger.warning(f"User {interaction.user.name} ({interaction.user.id}) tried using an admin command without the needed permissions")
 		return False
@@ -77,31 +77,6 @@ class AdminCog(commands.Cog):
 			reference=interaction.channel.get_partial_message(int(respond_to_id)) if respond_to_id else None
 		)
 		await interaction.delete_original_response()
-	
-	@discord.app_commands.command()
-	@discord.app_commands.guild_only()
-	@discord.app_commands.default_permissions(manage_roles=True)
-	@discord.app_commands.checks.has_permissions(manage_roles=True)
-	async def verify_user(self, interaction:discord.Interaction, username:str, user:discord.Member):
-		await interaction.response.defer(thinking=True)
-		await self.bot.squadron.updateMembers()
-		dbuser = self.bot.db.getByName(username)
-		member = self.bot.squadron.getMember(username)
-		if dbuser is None and member is None:
-			await interaction.edit_original_response(content="User doesn't yet exist in database, nor on the War Thunder page")
-			return
-		elif dbuser is not None and dbuser.status != self.bot.db.Status.MEMBER:
-			dbuser.status = self.bot.db.Status.MEMBER
-			dbuser.discord_id = user.id
-			dbuser.push()
-			await interaction.edit_original_response(content=f"Successfully verified user '{username}'")
-		elif dbuser is None and member is not None:
-			_ = wtUtil.get_user_ids(username)[username]
-			if _ is not None:
-				self.bot.db.add_user(_, username=username, discord_id=user.id, joindate=member.joindate.date(), status=self.bot.db.Status.MEMBER)
-				await interaction.edit_original_response(content=f"Successfully verified user '{username}'")
-			else:
-				await interaction.edit_original_response(content="Could not retrieve user's gaijin ID")
 
 	@discord.app_commands.command()
 	@discord.app_commands.guild_only()
@@ -133,15 +108,6 @@ class AdminCog(commands.Cog):
 			await user.ban(delete_message_seconds=delete_messages, reason=reason)
 		await interaction.guild.unban(user, reason="softban")
 		await interaction.edit_original_response(content="User has been softbanned.")
-	
-	@discord.app_commands.command()
-	@discord.app_commands.guild_only()
-	@discord.app_commands.default_permissions(administrator=True)
-	async def check_news(self, interaction:discord.Interaction):
-		await interaction.response.defer(thinking=True, ephemeral=True)
-		await self.bot.newsAPI.periodicNewsPing(True)
-		await self.bot.newsAPI.periodicChLogPing(True)
-		await interaction.edit_original_response(content="Checked for news and changelogs")
 		
 async def setup(bot: 'Bot'):
 	await bot.add_cog(AdminCog(bot))
