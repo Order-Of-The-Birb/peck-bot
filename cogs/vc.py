@@ -32,7 +32,7 @@ class VcCog(commands.GroupCog, group_name="squad"):
 			self.logger.critical("Channels list is not empty")
 			return
 		for guild, config in shared.GUILD_CONFIGS.items():
-			category = next((i for i in shared.BOT.get_guild(guild).categories if i.id == config.category_ids[shared.CategoryIDs.SQUAD_VC]), None)
+			category = next((i for i in shared.BOT.get_guild(guild).categories if i.id == config.categories[shared.CategoryIDs.SQUAD_VC]), None)
 			if category is None: raise ValueError(f"Could not find the squad VC category for guild {guild}")
 
 			shared.BOT.squadVC[guild] = [shared.BOT._SquadVC.SquadVCData(i.id, datetime.now(UTC).timestamp(), None, datetime.now(UTC).timestamp()) 

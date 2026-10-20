@@ -19,56 +19,7 @@ class Bot(commands.Bot):
 		clip: 'Bot.GenericTimeout'
 		ai: 'Bot.GenericTimeout'
 	
-	class GenericTimeout:
-		cleanupTask:tasks.Loop
-		expiry:timedelta
-		def __init__(self, bot:'Bot', timeout_after:int=3, expires_after:timedelta = timedelta(minutes=5)):
-			self._wait_until_ready = bot.wait_until_ready
-			self.timeoutCount:int = timeout_after
-			self.cooldowns:dict[int, list[datetime]] = {}
-			self.expiry	= expires_after
-
-			self.cleanupTask = self.cleanup
-		def isTimedOut(self, user_id:int) -> bool:
-			return len(self.cooldowns.get(user_id, [])) >= self.timeoutCount
-		def getOldest(self, user_id:int) -> datetime|None:
-			tmp = self.cooldowns.get(user_id)
-			return min(tmp) if tmp else None
-		def add(self, user_id:int):
-			now = datetime.now(UTC)
-			self.cooldowns.setdefault(user_id, []).append(now)
-		def getExpireTime(self, user_id: int) -> datetime | None:
-			oldest = self.getOldest(user_id)
-			if oldest is None:
-				return None
-
-			expire_time = oldest + self.expiry
-
-			next_iter = self.cleanupTask.next_iteration
-			if next_iter is not None:
-				expire_time = max(expire_time, next_iter)
-
-			return expire_time
-		# region Integrated Loop
-		@tasks.loop(minutes=1)
-		async def cleanup(self):
-			rn = datetime.now(UTC)
-			for user, entries in list(self.cooldowns.items()):
-				new = [e for e in entries if rn - e < self.expiry]
-				if new:
-					self.cooldowns[user] = new
-				else:
-					self.cooldowns.pop(user, None)
-		@cleanup.before_loop
-		async def _beforeCleanup(self):
-			await self._wait_until_ready()
-		def stop(self):
-			if self.cleanupTask:
-				self.cleanupTask.cancel()
-		def run(self):
-			if self.cleanupTask:
-				self.cleanupTask.start()
-		# endregion
+	
 	def __init__(self, *args,**kwargs):
 		self.timeouts:Bot.Timeouts = {
 			"clip": self.GenericTimeout(self),
@@ -101,7 +52,7 @@ class Bot(commands.Bot):
 		config = shared.GUILD_CONFIGS.get(guild)
 		if config is None:
 			return False
-		return (self.get_guild(config.peck_server).get_member(member_id).get_role(config.role_ids[role_id])) is not None
+		return (self.get_guild(config.peck_server).get_member(member_id).get_role(config.roles[role_id])) is not None
 	async def generateAuditLog(
 			self,
 			guild: int,
@@ -135,7 +86,7 @@ class Bot(commands.Bot):
 			return
 		
 		if override_channel: channelID = override_channel
-		else: channelID = config.channel_ids[shared.ChannelIDs.AUDIT_LOG]
+		else: channelID = config.channels[shared.ChannelIDs.AUDIT_LOG]
 		await (self.get_channel(channelID)).send(embed=embed)
 
 	async def setup_hook(self):
@@ -178,10 +129,7 @@ def officer_only():
 		config = shared.GUILD_CONFIGS.get(interaction.guild.id)
 		if config is None:
 			return False
-		return any(
-			i.id in config.authority_role_ids
-			for i in interaction.user.roles
-		)
+		return interaction.user.guild_permissions.administrator
 	return discord.app_commands.check(predicate)
 def members_only():
 	async def predicate(interaction: discord.Interaction) -> bool:
@@ -189,6 +137,6 @@ def members_only():
 		config = shared.GUILD_CONFIGS.get(interaction.guild.id)
 		if config is None:
 			return False
-		return any(role.id == config.role_ids[shared.RoleIDs.MEMBER] for role in interaction.user.roles)
+		return any(role.id == config.roles[shared.RoleIDs.MEMBER] for role in interaction.user.roles)
 	return discord.app_commands.check(predicate)
 #endregion

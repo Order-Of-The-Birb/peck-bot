@@ -135,7 +135,7 @@ async def random_propaganda(guild:int) -> str:
 	config = shared.GUILD_CONFIGS.get(guild)
 	if config is None:
 		return
-	propaganda_ch = shared.BOT.get_channel(config.channel_ids[shared.ChannelIDs.PROPAGANDA])
+	propaganda_ch = shared.BOT.get_channel(config.channels[shared.ChannelIDs.PROPAGANDA])
 	selected_url = None
 	attachment_count = 0
 	async for message in propaganda_ch.history(limit=None):

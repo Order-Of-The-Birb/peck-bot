@@ -1,4 +1,5 @@
 import discord, logging
+from discord.ext import tasks
 from asyncio import get_running_loop
 from utils.bot import Bot
 from dotenv import load_dotenv
@@ -6,6 +7,9 @@ from os import getenv
 from dataclasses import dataclass
 from enum import StrEnum
 from datetime import timedelta, datetime, UTC
+from pathlib import Path
+from json import load as load_json
+from typing import Any
 
 _logger = logging.getLogger() 
 
@@ -39,18 +43,35 @@ class CategoryIDs(StrEnum):
 # endregion
 # region Bot IDs static Config
 @dataclass(frozen=True)
-class _GuildConfig:
-	channel_ids: dict[ChannelIDs, int]
-	role_ids: dict[RoleIDs, int]
-	category_ids: dict[CategoryIDs, int]
+class GuildConfig:
+	__PATH: Path
+
+	channels: dict[ChannelIDs, int]
+	roles: dict[RoleIDs, int]
+	categories: dict[CategoryIDs, int]
 	common_roles: tuple[int, ...]
-	peck_server: int
-	sqb_plan_check_limit: timedelta
-	authority_role_ids: tuple[int, ...]
+
+	@classmethod
+	def from_dict(cls, path:Path, data: dict[str, Any]):
+		pass
+
+	@classmethod
+	def from_id(cls, guild_id: int)	-> GuildConfig | None:
+		path = Path(__file__).parent / "guilds" / f"{guild_id}.json"
+		if not path.exists():
+			return None
+
+		config = load_json(path.read_text())
+
+		return cls.from_dict(path, config)
+
+	def refresh(self):
+		config = load_json(self.__PATH.read_text())
+
 
 GUILD_CONFIGS = {
-	917850361019125820: _GuildConfig(
-		channel_ids={
+	917850361019125820: GuildConfig(
+		channels={
 			ChannelIDs.LOGS: 1229136570498682900,
 			ChannelIDs.SPAM: 1229136570498682900,
 			ChannelIDs.ANNOUNCEMENTS: 931263111992848395,
@@ -60,7 +81,7 @@ GUILD_CONFIGS = {
 			ChannelIDs.PROPAGANDA: 1066119609914232842,
 			ChannelIDs.AUDIT_LOG: 1490460729994641408,
 		},
-		role_ids={
+		roles={
 			RoleIDs.MEMBER: 919803983286128661,
 			RoleIDs.PING: 1065769588849115248,
 			RoleIDs.OLD_TIMER: 917946204736860190,
@@ -69,7 +90,7 @@ GUILD_CONFIGS = {
 			RoleIDs.EVENT_NEWS: 1489360745039921222,
 			RoleIDs.APPLICANT: 1184950087873466438,
 		},
-		category_ids={
+		categories={
 			CategoryIDs.CLIPS: 1428798448102277263,
 			CategoryIDs.SQUAD_VC: 917850361019125821,
 		},
@@ -84,8 +105,8 @@ GUILD_CONFIGS = {
 			1185637328446816299 # Emergency Admin
 		)
 	),
-	685948316541779974: _GuildConfig(
-		channel_ids={
+	685948316541779974: GuildConfig(
+		channels={
 			ChannelIDs.LOGS: 1453040931703095550,
 			ChannelIDs.SPAM: 1453040954343821513,
 			ChannelIDs.ANNOUNCEMENTS: 1453040983934767277,
@@ -95,7 +116,7 @@ GUILD_CONFIGS = {
 			ChannelIDs.PROPAGANDA: 1456788537755045931,
 			ChannelIDs.AUDIT_LOG: 1490460729994641408,
 		},
-		role_ids={
+		roles={
 			RoleIDs.MEMBER: 1073297853587398696,
 			RoleIDs.PING: 1456660597616803956,
 			RoleIDs.OLD_TIMER: 1454228913742938112,
@@ -104,7 +125,7 @@ GUILD_CONFIGS = {
 			RoleIDs.EVENT_NEWS: 1489360453233541170,
 			RoleIDs.APPLICANT: 1477308945759735900,
 		},
-		category_ids={
+		categories={
 			CategoryIDs.CLIPS: 1454228135280119982,
 			CategoryIDs.SQUAD_VC: 1453040903626293338,
 		},
@@ -175,3 +196,53 @@ async def _setupBot():
 		runtime=loop,
 		logLevel=_logger.getEffectiveLevel()
 	)
+
+class GenericTimeout:
+	cleanupTask:tasks.Loop
+	expiry:timedelta
+	def __init__(self, timeout_after:int=3, expires_after:timedelta = timedelta(minutes=5)):
+		self.timeoutCount:int = timeout_after
+		self.cooldowns:dict[int, list[datetime]] = {}
+		self.expiry	= expires_after
+
+		self.cleanupTask = self.cleanup
+	def isTimedOut(self, user_id:int) -> bool:
+		return len(self.cooldowns.get(user_id, [])) >= self.timeoutCount
+	def getOldest(self, user_id:int) -> datetime|None:
+		tmp = self.cooldowns.get(user_id)
+		return min(tmp) if tmp else None
+	def add(self, user_id:int):
+		now = datetime.now(UTC)
+		self.cooldowns.setdefault(user_id, []).append(now)
+	def getExpireTime(self, user_id: int) -> datetime | None:
+		oldest = self.getOldest(user_id)
+		if oldest is None:
+			return None
+
+		expire_time = oldest + self.expiry
+
+		next_iter = self.cleanupTask.next_iteration
+		if next_iter is not None:
+			expire_time = max(expire_time, next_iter)
+
+		return expire_time
+	# region Integrated Loop
+	@tasks.loop(minutes=1)
+	async def cleanup(self):
+		rn = datetime.now(UTC)
+		for user, entries in list(self.cooldowns.items()):
+			new = [e for e in entries if rn - e < self.expiry]
+			if new:
+				self.cooldowns[user] = new
+			else:
+				self.cooldowns.pop(user, None)
+	@cleanup.before_loop
+	async def _beforeCleanup(self):
+		await BOT.wait_until_ready()
+	def stop(self):
+		if self.cleanupTask:
+			self.cleanupTask.cancel()
+	def run(self):
+		if self.cleanupTask:
+			self.cleanupTask.start()
+	# endregion

@@ -44,7 +44,7 @@ class ClipsCog(commands.GroupCog, group_name="clips"):
 			return
 
 		for categ in interaction.guild.categories:
-			if categ.id != config.category_ids[shared.CategoryIDs.CLIPS]: continue
+			if categ.id != config.categories[shared.CategoryIDs.CLIPS]: continue
 			clipCateg = categ
 			break
 		else:
