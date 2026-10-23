@@ -5,7 +5,7 @@ from discord.ext import commands, tasks
 from datetime import datetime, timedelta, UTC
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-	from utils.bot import Bot
+	from bot.client import Bot
 # ChannelIDs, RoleIDs, CategoryIDs
 # owner_only, officer_only, members_only, debug_only
 #import utils.generic as genericUtil
@@ -21,7 +21,7 @@ class VcCog(commands.GroupCog, group_name="squad"):
 		self.logger = logging.getLogger(__name__)
 		self.SQUADVC_RE = re.compile(r"squad (\d+)", re.IGNORECASE)
 		
-		self._init_task = shared.BOT.runtime.create_task(vcInit(), name="peck-squad-vc-init")
+		self._init_task = shared.BOT.runtime.create_task(self.vcInit(), name="peck-squad-vc-init")
 		self._init_task.add_done_callback(self._init_done)
 		self.logger.debug(f"{self.__class__.__name__} initialized")
 
@@ -64,7 +64,7 @@ class VcCog(commands.GroupCog, group_name="squad"):
 			if channel.creator == interaction.user.id and channel.created >= _30min_ago:
 				await interaction.edit_original_response(content="You created a channel recently, chill out dude...")
 				return
-		category = next((category for category in shared.BOT.get_guild(shared.BOT.peckServer).categories if category.id == shared.BOT.categoryIDs[CategoryIDs.SQUAD_VC]), None)
+		category = next((category for category in shared.BOT.get_guild(shared.BOT.peckServer).categories if category.id == shared.BOT.categoryIDs[shared.CategoryIDs.SQUAD_VC]), None)
 		if category is None: raise ValueError("Category not found... Does the server still exist?")
 		squad_voice_channels = [i for i in interaction.guild.voice_channels if self.SQUADVC_RE.fullmatch(i.name) is not None and i in category.voice_channels]
 		squad_numbers = sorted([int(i.name.split()[-1]) for i in squad_voice_channels], reverse=True)

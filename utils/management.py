@@ -1,13 +1,12 @@
 from os import getenv
 from typing import Any, overload
 from aiohttp import ClientResponseError
-from modules import network
+from utils import network
 from dataclasses import dataclass
 from enum import Enum
 from datetime import datetime, UTC
 
 _url: str = getenv("management_api_url", "http://127.0.0.1:8000/").strip().removesuffix("/")
-_token: str = getenv("management_token")
 SQUADRON_ID = None
 
 @dataclass(slots=True, frozen=True)
@@ -89,11 +88,6 @@ async def get(*, username:str = None, discord_id: int = None, gaijin_id: int = N
 async def context(user:int) -> tuple[dict[str, Any]]:
 	async with network.get(f"{_url}/api/v1/users/{user}/context") as r:
 		return tuple(await r.json())
-
-async def thunderapi_token() -> str:
-	async with network.get(f"{_url}/api/v1/server-token", headers={"Authorization": f"Bearer {_token}"}) as r:
-		data = await r.json()
-	return data["token"]
 
 async def upd_squadron_id():
 	global SQUADRON_ID

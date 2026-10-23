@@ -18,7 +18,7 @@ from utils.time import discord_timestamp, sqb_brackets, timestampTypes
 from utils.generic import httperror
 from utils.resources import browser_slot
 if TYPE_CHECKING:
-	from utils.bot import Bot
+	from bot.client import Bot
 	from playwright.async_api import Page as aPage
 logger = logging.getLogger(__name__)
 

@@ -9,15 +9,15 @@ from datetime import datetime, UTC, timedelta
 from typing import Literal, TypedDict
 from os import getenv
 from dataclasses import dataclass
-from cogs import EXTENSIONS
+from bot.cogs import EXTENSIONS
 import shared
 logger = logging.getLogger(__name__)
 
 class Bot(commands.Bot):
 	ltsLock = Lock()
 	class Timeouts(TypedDict):
-		clip: 'Bot.GenericTimeout'
-		ai: 'Bot.GenericTimeout'
+		clip: 'shared.GenericTimeout'
+		ai: 'shared.GenericTimeout'
 	
 	
 	def __init__(self, *args,**kwargs):
@@ -53,41 +53,6 @@ class Bot(commands.Bot):
 		if config is None:
 			return False
 		return (self.get_guild(config.peck_server).get_member(member_id).get_role(config.roles[role_id])) is not None
-	async def generateAuditLog(
-			self,
-			guild: int,
-			/,
-			*,
-			description:str = None,
-			author:discord.User|discord.Member|discord.Guild=None,
-			title:str = None,
-			url:str=None,
-			color:int=None,
-			footer_text:str=None,
-			footer_icon_url:str=None,
-			items:list[dict[Literal["name", "value"], str]|None] = [],
-			override_channel:int=None,
-			timestamp:datetime=None,
-			author_name_override:str = None,
-			author_avatar_thumbnail:bool = False
-		) -> None:
-		embed = discord.Embed(title=title, description=description, timestamp=datetime.now(UTC) if not timestamp else timestamp, color=color, url=url)
-		if author_avatar_thumbnail: embed.set_thumbnail(url=(author.display_avatar.url if isinstance(author, (discord.Member, discord.User)) else (author.icon.url if isinstance(author, discord.Guild) else None)))
-		if isinstance(author, (discord.Member, discord.User)): embed.set_author(name=author.name, icon_url=author.display_avatar.url)
-		elif isinstance(author, discord.Guild): embed.set_author(name=author.name, icon_url=author.icon.url)
-		if author_name_override: embed.set_author(name=author_name_override, icon_url=author.icon.url if isinstance(author, discord.Guild) else (author.display_avatar.url if isinstance(author, (discord.Member, discord.User)) else None))
-		for item in items:
-			if item is None: continue
-			embed.add_field(name=item["name"], value=item["value"], inline=False)
-		embed.set_footer(text=footer_text if footer_text else (f"ID: {author.id}" if author else ""), icon_url=footer_icon_url)
-		
-		config = shared.GUILD_CONFIGS.get(guild)
-		if config is None:
-			return
-		
-		if override_channel: channelID = override_channel
-		else: channelID = config.channels[shared.ChannelIDs.AUDIT_LOG]
-		await (self.get_channel(channelID)).send(embed=embed)
 
 	async def setup_hook(self):
 		logger.info("Bot is getting ready...")

@@ -4,24 +4,23 @@ import discord, logging, asyncio
 from re import sub as re_sub
 from discord.ext import commands
 from datetime import datetime, timedelta, UTC
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 if TYPE_CHECKING:
-	from modules.newsAPI import NewsAPI
-	from utils.bot import Bot
+	from utils.newsAPI import NewsAPI
+	from bot.client import Bot
 # ChannelIDs, RoleIDs, CategoryIDs
 # owner_only, officer_only, members_only, debug_only
-from utils.bot import ChannelIDs, RoleIDs
+from bot.client import ChannelIDs, RoleIDs
 import utils.generic as genericUtil
 import utils.time as timeUtil
 #import utils.wt as wtUtil
 import shared
-from modules import management
+from utils import management
 
 # "utils.generic", "utils.time", "utils.wt"
 __reload_deps__ = ("utils.generic", "utils.time")
 
 sqb_member_last_seen = datetime.now(UTC)-timedelta(minutes=30)
-
 
 class Listeners(commands.Cog):
 	def __init__(self, bot:'Bot'):

@@ -7,16 +7,16 @@ from discord.ui import (
 	Section, Separator, ActionRow, RadioGroup, Checkbox, CheckboxGroup, Label,
 	MediaGallery, Thumbnail
 )
-from discord import (
+from bot.cogs import (
     Interaction, Member, Attachment, User, Permissions,
 	CategoryChannel, TextChannel, VoiceChannel,
 	HTTPException, TextStyle, ButtonStyle, NotFound
 )
 from logging import getLogger as _gL
 from typing import Protocol
-from utils.bot import Bot, CategoryIDs, ChannelIDs, RoleIDs
+from bot.client import Bot, CategoryIDs, ChannelIDs, RoleIDs
 from utils import generic as genericUtil, wt as wtUtil
-import modules.management as Management
+import utils.management as Management
 
 __reload_deps__ = ("utils.generic")
 _logger = _gL(__name__)

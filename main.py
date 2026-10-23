@@ -4,8 +4,9 @@ from logging.handlers import TimedRotatingFileHandler
 from os import environ, getenv, path
 # Custom packages
 import shared
-from cogs import EXTENSIONS
-from modules import newsAPI, network, management
+from bot.cogs import EXTENSIONS
+from utils import newsAPI
+from utils import management, network
 
 def log_namer(default_name:str):
 	dirname = path.dirname(default_name)

@@ -1,7 +1,7 @@
 import discord, logging
 from discord.ext import tasks
 from asyncio import get_running_loop
-from utils.bot import Bot
+from bot.client import Bot
 from dotenv import load_dotenv
 from os import getenv
 from dataclasses import dataclass

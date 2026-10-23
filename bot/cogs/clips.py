@@ -4,11 +4,10 @@ import discord, logging
 from discord.ext import commands
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-	from utils.bot import Bot
-# ChannelIDs, RoleIDs, CategoryIDs
+	from bot.client import Bot
 # owner_only, officer_only, members_only, debug_only
-from utils.bot import officer_only, CategoryIDs
-from utils.modals import CreateClipCh, AddAlias
+from bot.client import officer_only
+from bot.modals import CreateClipCh, AddAlias
 #import utils.time as timeUtil
 #import utils.wt as wtUtil
 import shared

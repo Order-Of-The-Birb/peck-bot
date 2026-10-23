@@ -2,16 +2,16 @@ from __future__ import annotations
 from asyncio import get_running_loop
 from datetime import datetime
 from typing import Literal, TYPE_CHECKING, Any, NoReturn, Coroutine
-from discord import Embed
+from bot.cogs import Embed
 from enum import Enum
 if __name__ == "__main__":
 	from os import path
 	from sys import path as sys_path
 	sys_path.append(path.abspath(path.join(path.dirname(__file__), '..')))
 
-from modules.thunderapi import news_ws
+from utils.thunderapi import news_ws
 if TYPE_CHECKING:
-	from utils.bot import Bot
+	from bot.client import Bot
 	from asyncio import Task
 
 class News:

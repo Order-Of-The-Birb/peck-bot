@@ -4,7 +4,7 @@ import discord, logging
 from discord.ext import commands
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-	from utils.bot import Bot
+	from bot.client import Bot
 # ChannelIDs, RoleIDs, CategoryIDs
 # owner_only, officer_only, members_only, debug_only
 #from utils.bot import 
@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 import shared
 
 # "utils.generic", "utils.time", "utils.wt"
+# "bot.modals", "bot.client"
 __reload_deps__ = ()
 
 class className(commands.GroupCog, group_name=""):

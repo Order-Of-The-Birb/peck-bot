@@ -4,14 +4,14 @@ import discord, logging
 from discord.ext import commands
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-	from utils.bot import Bot
+	from bot.client import Bot
 # ChannelIDs, RoleIDs, CategoryIDs
 # owner_only, officer_only, members_only, debug_only
 #from utils.bot import 
 #import utils.generic as genericUtil
 #import utils.time as timeUtil
 #import utils.wt as wtUtil
-from modules import management
+from utils import management
 import shared
 
 # "utils.generic", "utils.time", "utils.wt"
@@ -23,7 +23,7 @@ class ContextMenuCog(commands.Cog):
 		self.logger = logging.getLogger(__name__)
 		self.logger.debug(f"{self.__class__.__name__} initialized")
 		self.menuItems = (
-			discord.app_commands.ContextMenu(
+			bot.app_commands.ContextMenu(
 				name="Get War Thunder username",
 				callback=self.get_wt_name
 			),

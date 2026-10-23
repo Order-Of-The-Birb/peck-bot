@@ -5,11 +5,11 @@ from discord.ext import commands
 from typing import TYPE_CHECKING
 from sys import modules as sysmodules
 if TYPE_CHECKING:
-	from utils.bot import Bot
-from cogs import EXTENSIONS
+	from bot.client import Bot
+from bot.cogs import EXTENSIONS
 # ChannelIDs, RoleIDs, CategoryIDs
 # owner_only, officer_only, members_only, debug_only
-from utils.bot import owner_only
+from bot.client import owner_only
 from utils.memory import process_memory, cache_counts
 from psutil._common import bytes2human
 #import utils.generic as genericUtil
@@ -22,7 +22,7 @@ __reload_deps__ = ()
 async def reload_autocomplete(interaction: discord.Interaction, current: str):
 	options = [
 		discord.app_commands.Choice(name=i, value=i)
-		for i in [i.removeprefix("cogs.") for i in EXTENSIONS] if current.lower() in i.lower()
+		for i in [i.removeprefix("discord.") for i in EXTENSIONS] if current.lower() in i.lower()
 	]
 	if current.lower() in "all":
 		options.append(discord.app_commands.Choice(name="all", value="all"))
@@ -68,7 +68,7 @@ class OwnerCog(commands.Cog):
 					await self.bot.reload_extension_with_deps(ext, *deps)
 				await interaction.edit_original_response(content="Reloaded all cogs")
 			else:
-				full = f"cogs.{extension}"
+				full = f"discord.{extension}"
 				module = sysmodules.get(full)
 				deps = getattr(module, "__reload_deps__", ()) if module else ()
 				await self.bot.reload_extension_with_deps(full, *deps)

@@ -1,20 +1,13 @@
-import discord, matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-from matplotlib.ticker import MaxNLocator
-from io import BytesIO
 from asyncio import sleep
 from logging import getLogger
 from aiohttp import ClientSession, ClientResponseError
 from datetime import datetime, UTC
 from os import getenv
-from typing import Any, AsyncGenerator, NoReturn, Literal
-from modules import network, management
+from typing import Any, AsyncGenerator, NoReturn
+from utils import network
 
 _logger = getLogger(__name__)
 
-_token: str = None
 _api_url: str = getenv("thunderapi_url", "http://127.0.0.1:8008/")
 
 async def replay(replay_id:str|int) -> dict[str, Any]:
@@ -41,7 +34,7 @@ class user:
 	async def src(username:str) -> dict[str, Any]:
 		return await _get_json(f"/v1/users/search/{username}")
 	@staticmethod
-	async def terse(*userids) -> dict[str, Any]:
+	async def terse(*userids:int) -> dict[str, Any]:
 		return await _get_json(f"/v1/users/terse?{"&".join(f"id={i}" for i in userids)}")
 class clan:
 	@staticmethod
@@ -80,18 +73,11 @@ async def _get_json(path: str, **kwargs) -> Any:
 	except ClientResponseError as e:
 		if e.status != 401:
 			raise
-	global _token
-	_token = await management.thunderapi_token()
 	return await _fetch_json(path, **kwargs)
 
 async def _fetch_json(path: str, **kwargs) -> Any:
-	global _token
-	if _token is None:
-		_token = await management.thunderapi_token()
-
 	async with network.get(
 		_create_url(path),
-		headers={"Authorization": f"Bearer {_token}"},
 		**kwargs
 	) as r:
 		return await r.json()

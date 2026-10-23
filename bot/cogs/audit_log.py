@@ -6,9 +6,9 @@ from discord.ext import commands
 from datetime import datetime, UTC
 from calendar import monthrange
 from enum import IntEnum, StrEnum
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Literal
 if TYPE_CHECKING:
-	from utils.bot import Bot
+	from bot.client import Bot
 # ChannelIDs, RoleIDs, CategoryIDs
 # owner_only, officer_only, members_only, debug_only
 #from utils.bot import 
@@ -156,6 +156,90 @@ class auditLogCog(commands.Cog):
 			months += 12
 
 		return f"{f"{years} year{"s" if years > 1 else ""}, " if years > 0 else ""}{f"{months} month{"s" if months > 1 else ""}, " if months > 0 else ""}{days} days"
+
+	@staticmethod
+	async def generateAuditLog(
+		guild: int,
+		/,
+		*,
+		description:str = None,
+		author:discord.User|discord.Member|discord.Guild=None,
+		title:str = None,
+		url:str=None,
+		color:int=None,
+		footer_text:str=None,
+		footer_icon_url:str=None,
+		items:list[dict[Literal["name", "value"], str]|None] = [],
+		override_channel:int=None,
+		timestamp:datetime=None,
+		author_name_override:str = None,
+		author_avatar_thumbnail:bool = False
+	) -> None:
+		embed = discord.Embed(
+			title=title, 
+			description=description, 
+			timestamp=datetime.now(UTC) if not timestamp else timestamp, 
+			color=color, 
+			url=url
+		)
+		if author_avatar_thumbnail: 
+			embed.set_thumbnail(
+				url=(
+					author.display_avatar.url 
+					if isinstance(author, (discord.Member, discord.User)) else 
+					(
+						author.icon.url 
+						if isinstance(author, discord.Guild) else 
+						None
+					)
+				)
+			)
+		if isinstance(author, (discord.Member, discord.User)): 
+			embed.set_author(
+				name=author.name, 
+				icon_url=author.display_avatar.url
+			)
+		elif isinstance(author, discord.Guild): 
+			embed.set_author(
+				name=author.name, 
+				icon_url=author.icon.url
+			)
+		if author_name_override: 
+			embed.set_author(
+				name=author_name_override, 
+				icon_url=author.icon.url 
+				if isinstance(author, discord.Guild) else 
+				(
+					author.display_avatar.url 
+					if isinstance(author, (discord.Member, discord.User)) else 
+					None
+				)
+			)
+		for item in items:
+			if item is None: continue
+			embed.add_field(
+				name=item["name"], 
+				value=item["value"], 
+				inline=False
+			)
+		embed.set_footer(
+			text=footer_text 
+			if footer_text else (
+				f"ID: {author.id}" 
+				if author else 
+				""
+			), 
+			icon_url=footer_icon_url
+		)
+		
+		config = shared.GUILD_CONFIGS.get(guild)
+		if config is None:
+			return
+		
+		if override_channel: channelID = override_channel
+		else: channelID = config.channels[shared.ChannelIDs.AUDIT_LOG]
+		await (shared.BOT.get_channel(channelID)).send(embed=embed)
+
 	@staticmethod
 	async def getAuditLogEntry(
 		action: discord.AuditLogAction,
@@ -192,7 +276,7 @@ class auditLogCog(commands.Cog):
 	@commands.Cog.listener()
 	async def on_guild_channel_delete(self, channel:discord.abc.GuildChannel):
 		auditLogEntry = await self.getAuditLogEntry(discord.AuditLogAction.channel_delete, guild=channel.guild, target=channel)
-		await shared.BOT.generateAuditLog(
+		await self.generateAuditLog(
 			title="Channel deleted", color=AuditColor.DELETE, author=channel.guild, 
 			items=[
 				{"name": "Channel ID", "value": channel.id},
@@ -204,7 +288,7 @@ class auditLogCog(commands.Cog):
 	@commands.Cog.listener()
 	async def on_guild_channel_create(self, channel:discord.abc.GuildChannel):
 		auditLogEntry = await self.getAuditLogEntry(discord.AuditLogAction.channel_create, guild=channel.guild, target=channel)
-		await shared.BOT.generateAuditLog(
+		await self.generateAuditLog(
 			title="Channel created", color=AuditColor.CREATE, author=channel.guild, 
 			items=[
 				{"name": "Channel", "value": channel.mention},
@@ -216,7 +300,7 @@ class auditLogCog(commands.Cog):
 	async def on_guild_channel_update(self, before:discord.abc.GuildChannel, after:discord.abc.GuildChannel):
 		auditLogEntry = await self.getAuditLogEntry(discord.AuditLogAction.channel_update, guild=after.guild, target=after)
 		if before.name != after.name:
-			await shared.BOT.generateAuditLog(
+			await self.generateAuditLog(
 				title="Channel renamed", description=after.mention, color=AuditColor.CREATE, author=after.guild, 
 				items=[
 					{"name": "Before", "value": before.name},
@@ -226,7 +310,7 @@ class auditLogCog(commands.Cog):
 				footer_text=f"ID: {after.id}"
 			)
 		if before.position != after.position:
-			await shared.BOT.generateAuditLog(
+			await self.generateAuditLog(
 				title="Channel moved", description=after.mention, color=AuditColor.CREATE, author=after.guild, 
 				items=[
 					{"name": "Before", "value": before.position},
@@ -252,7 +336,7 @@ class auditLogCog(commands.Cog):
 	@commands.Cog.listener()
 	async def on_member_join(self, member:discord.Member):
 		account_age = self._format_account_age(member.created_at)
-		await shared.BOT.generateAuditLog(
+		await self.generateAuditLog(
 			title="User Joined", author=member, color=AuditColor.CREATE, timestamp=member.joined_at,
 			items=[
 				{"name":"User", "value": member.mention},
@@ -262,7 +346,7 @@ class auditLogCog(commands.Cog):
 	@commands.Cog.listener()
 	async def on_member_remove(self, member:discord.Member):
 		auditLogEntry = await self.getAuditLogEntry(discord.AuditLogAction.kick, guild=member.guild, target=member)
-		await shared.BOT.generateAuditLog(
+		await self.generateAuditLog(
 			title=f"User {"Kicked" if auditLogEntry and auditLogEntry.user and auditLogEntry.user.id != member.id else "Left"}", author=member, color=AuditColor.DELETE, 
 			items=[
 				{"name": "User", "value": member.mention},
@@ -273,7 +357,7 @@ class auditLogCog(commands.Cog):
 	async def on_member_update(self, before:discord.Member, after:discord.Member):
 		if before.nick != after.nick:
 			auditLogEntry = await self.getAuditLogEntry(discord.AuditLogAction.member_update, guild=after.guild, target=after)
-			await shared.BOT.generateAuditLog(
+			await self.generateAuditLog(
 				description=f"**{after.mention} nickname changed**", author=before, color=AuditColor.MODIFY,
 				items=[
 					{"name": "Before", "value": before.nick},
@@ -285,7 +369,7 @@ class auditLogCog(commands.Cog):
 			auditLogEntry = await self.getAuditLogEntry(discord.AuditLogAction.member_update, guild=after.guild, target=after)
 			new_roles = [i for i in after.roles if i not in before.roles]
 			if new_roles:
-				await shared.BOT.generateAuditLog(
+				await self.generateAuditLog(
 					title=f"Role{"s" if len(new_roles) > 1 else ""} given", description=", ".join(i.name for i in new_roles), author=after, color=AuditColor.MODIFY, 
 					items=[
 						{"name": "Moderator", "value": auditLogEntry.user.mention if auditLogEntry and auditLogEntry.user else "Unknown"}
@@ -293,7 +377,7 @@ class auditLogCog(commands.Cog):
 				)
 			rm_roles = [i for i in before.roles if i not in after.roles]
 			if rm_roles:
-				await shared.BOT.generateAuditLog(
+				await self.generateAuditLog(
 					title=f"Role{"s" if len(rm_roles) > 1 else ""} removed", description=", ".join(i.name for i in rm_roles), author=after, color=AuditColor.MODIFY, 
 					items=[
 						{"name": "Moderator", "value": auditLogEntry.user.mention if auditLogEntry and auditLogEntry.user else "Unknown"}
@@ -301,7 +385,7 @@ class auditLogCog(commands.Cog):
 				)
 		if not before.is_timed_out() and after.is_timed_out():
 			auditLogEntry = await self.getAuditLogEntry(discord.AuditLogAction.member_update, guild=after.guild, target=after, key=AuditLogDiffTypes.TIMED_OUT_UNTIL)
-			await shared.BOT.generateAuditLog(
+			await self.generateAuditLog(
 				description=f"**{before.mention} got timed out**", author=after, color=AuditColor.DELETE, 
 				items=[
 					{"name": "Until", "value": f"{after.timed_out_until.strftime("%Y-%m-%d %H:%M (%Z)")}"},
@@ -312,7 +396,7 @@ class auditLogCog(commands.Cog):
 		elif before.is_timed_out() and not after.is_timed_out():
 			auditLogEntry = await self.getAuditLogEntry(discord.AuditLogAction.member_update, guild=after.guild, target=after, key=AuditLogDiffTypes.TIMED_OUT_UNTIL
 			)
-			await shared.BOT.generateAuditLog(
+			await self.generateAuditLog(
 				description=f"**{before.mention}'s timeout has been removed**", author=after, color=AuditColor.CREATE, 
 				items=[{"name": "Moderator", "value": auditLogEntry.user.mention if auditLogEntry else "Unknown"}]
 			)
@@ -320,7 +404,7 @@ class auditLogCog(commands.Cog):
 	@commands.Cog.listener()
 	async def on_member_ban(self, guild:discord.Guild, user:discord.User|discord.Member):
 		auditLogEntry = await self.getAuditLogEntry(discord.AuditLogAction.ban, guild=guild, target=user)
-		await shared.BOT.generateAuditLog(
+		await self.generateAuditLog(
 			title="User banned", author=guild, color=AuditColor.DELETE, author_avatar_thumbnail=True,
 			items=[
 				{"name": "User", "value": user.mention},
@@ -331,7 +415,7 @@ class auditLogCog(commands.Cog):
 	@commands.Cog.listener()
 	async def on_member_unban(self, guild:discord.Guild, user:discord.User):
 		auditLogEntry = await self.getAuditLogEntry(discord.AuditLogAction.unban, guild=guild, target=user)
-		await shared.BOT.generateAuditLog(
+		await self.generateAuditLog(
 			title="User unbanned", author=guild, color=AuditColor.MODIFY, author_avatar_thumbnail=True, 
 			items=[
 				{"name": "User", "value": user.mention},
@@ -344,7 +428,7 @@ class auditLogCog(commands.Cog):
 	async def on_message_edit(self, before:discord.Message, after:discord.Message):
 		if after.author.bot: return
 		if before.content != after.content:
-			await shared.BOT.generateAuditLog(
+			await self.generateAuditLog(
 				title="Message edited", description=f"In channel {after.channel.mention}", author=after.author, url=after.jump_url, color=AuditColor.MODIFY, 
 				items=[
 					{"name": "Before", "value": before.content},
@@ -353,7 +437,7 @@ class auditLogCog(commands.Cog):
 			)
 		elif not before.pinned and after.pinned:
 			auditLogEntry = await self.getAuditLogEntry(discord.AuditLogAction.message_pin, guild=after.guild)
-			await shared.BOT.generateAuditLog(
+			await self.generateAuditLog(
 				title="Message pinned", url=after.jump_url, author=after.author, color=AuditColor.CREATE,
 				items=[
 					{"name": "Channel", "value": after.channel.mention},
@@ -363,7 +447,7 @@ class auditLogCog(commands.Cog):
 			)
 		elif before.pinned and not after.pinned:
 			auditLogEntry = await self.getAuditLogEntry(discord.AuditLogAction.message_unpin, guild=after.guild)
-			await shared.BOT.generateAuditLog(
+			await self.generateAuditLog(
 				title="Message unpinned", url=after.jump_url, author=after.author, color=AuditColor.DELETE,
 				items=[
 					{"name": "Channel", "value": after.channel.mention},
@@ -375,7 +459,7 @@ class auditLogCog(commands.Cog):
 	async def on_message_delete(self, message:discord.Message):
 		if message.author.bot or isinstance(message.channel, discord.DMChannel): return
 		auditLogEntry = await self.getAuditLogEntry(discord.AuditLogAction.message_delete, guild=message.guild)
-		await shared.BOT.generateAuditLog(
+		await self.generateAuditLog(
 			title="Message deleted", author=message.author, color=AuditColor.DELETE, 
 			items=[
 				{"name": "Sent by", "value": message.author.mention},
@@ -390,7 +474,7 @@ class auditLogCog(commands.Cog):
 	@commands.Cog.listener()
 	async def on_guild_role_create(self, role:discord.Role):
 		auditLogEntry = await self.getAuditLogEntry(discord.AuditLogAction.role_create, guild=role.guild)
-		await shared.BOT.generateAuditLog(
+		await self.generateAuditLog(
 			title="Role created", color=AuditColor.CREATE, author=role.guild,
 			items=[
 				{"name": "Role", "value": role.mention},
@@ -401,7 +485,7 @@ class auditLogCog(commands.Cog):
 	@commands.Cog.listener()
 	async def on_guild_role_delete(self, role:discord.Role):
 		auditLogEntry = await self.getAuditLogEntry(discord.AuditLogAction.role_delete, guild=role.guild)
-		await shared.BOT.generateAuditLog(
+		await self.generateAuditLog(
 			title="Role deleted", footer_text=f"ID: {role.id}", color=AuditColor.DELETE, author=role.guild,
 			items=[
 				{"name": "Role ID", "value": role.id},
@@ -414,7 +498,7 @@ class auditLogCog(commands.Cog):
 	async def on_guild_role_update(self, before:discord.Role, after:discord.Role):
 		auditLogEntry = await self.getAuditLogEntry(discord.AuditLogAction.role_update, guild=after.guild)
 		if before.color != after.color:
-			await shared.BOT.generateAuditLog(
+			await self.generateAuditLog(
 				title="Role changed", color=AuditColor.MODIFY, author=before.guild,
 				items=[
 					{"name": "Before", "value": f"#{before._colour:06X}"},
@@ -423,7 +507,7 @@ class auditLogCog(commands.Cog):
 				]
 			)
 		if before.name != after.name:
-			await shared.BOT.generateAuditLog(
+			await self.generateAuditLog(
 				title="Role renamed", color=AuditColor.MODIFY, author=before.guild,
 				items=[
 					{"name": "Before", "value": before.name},
@@ -435,7 +519,7 @@ class auditLogCog(commands.Cog):
 	# region Scheduled event
 	@commands.Cog.listener()
 	async def on_scheduled_event_create(self, event:discord.ScheduledEvent):
-		await shared.BOT.generateAuditLog(
+		await self.generateAuditLog(
 			title="Scheduled event created", url=event.url, color=AuditColor.CREATE, author=event.creator,
 			items=[
 				{"name":"Title", "value":event.name},
@@ -449,7 +533,7 @@ class auditLogCog(commands.Cog):
 	# on_scheduled_event_update(before, after)
 	@commands.Cog.listener()
 	async def on_scheduled_event_delete(self, event:discord.ScheduledEvent):
-		await shared.BOT.generateAuditLog(
+		await self.generateAuditLog(
 			title="Scheduled event deleted", url=event.url, color=AuditColor.DELETE, author=event.creator, 
 			items=[
 				{"name":"Title", "value":event.name},
@@ -472,20 +556,20 @@ class auditLogCog(commands.Cog):
 	@commands.Cog.listener()
 	async def on_voice_state_update(self, member:discord.Member, before:discord.VoiceState, after:discord.VoiceState):
 		if before.channel is not None and after.channel is None:
-			await shared.BOT.generateAuditLog(
+			await self.generateAuditLog(
 				description=f"{member.mention} left voice channel {before.channel.mention}", color=AuditColor.DELETE, author=member
 			)
 		elif before.channel is None and after.channel is not None:
-			await shared.BOT.generateAuditLog(
+			await self.generateAuditLog(
 				description=f"{member.mention} left voice channel {after.channel.mention}", color=AuditColor.CREATE, author=member
 			)
 		elif before.channel is not None and after.channel is not None and before.channel.id != after.channel.id:
-			await shared.BOT.generateAuditLog(
+			await self.generateAuditLog(
 				description=f"{member.mention} switched voice channels {before.channel.mention} -> {after.channel.mention}", color=AuditColor.MODIFY, author=member
 			)
 		if not before.deaf and (after.deaf and not after.self_deaf):
 			auditLogEntry = await self.getAuditLogEntry(discord.AuditLogAction.member_update, guild=member.guild, target=member, key=AuditLogDiffTypes.DEAF)
-			await shared.BOT.generateAuditLog(
+			await self.generateAuditLog(
 				title="User server deafened", color=AuditColor.MODIFY, author=member,
 				items=[
 					{"name": "User", "value": member.mention},
@@ -494,7 +578,7 @@ class auditLogCog(commands.Cog):
 			)
 		elif (before.deaf and not before.self_deaf) and not after.deaf:
 			auditLogEntry = await self.getAuditLogEntry(discord.AuditLogAction.member_update, guild=member.guild, target=member, key=AuditLogDiffTypes.DEAF, lookupAfter=False)
-			await shared.BOT.generateAuditLog(
+			await self.generateAuditLog(
 				title="User server undeafened", color=AuditColor.MODIFY, author=member,
 				items=[
 					{"name": "User", "value": member.mention},
@@ -503,7 +587,7 @@ class auditLogCog(commands.Cog):
 			)
 		if not before.mute and (after.mute and not after.self_mute):
 			auditLogEntry = await self.getAuditLogEntry(discord.AuditLogAction.member_update, guild=member.guild, target=member, key=AuditLogDiffTypes.MUTE)
-			await shared.BOT.generateAuditLog(
+			await self.generateAuditLog(
 				title="User server muted", color=AuditColor.MODIFY, author=member,
 				items=[
 					{"name": "User", "value": member.mention},
@@ -512,7 +596,7 @@ class auditLogCog(commands.Cog):
 			)
 		elif (before.mute and not before.self_mute) and not after.mute:
 			auditLogEntry = await self.getAuditLogEntry(discord.AuditLogAction.member_update, guild=member.guild, target=member, key=AuditLogDiffTypes.MUTE, lookupAfter=False)
-			await shared.BOT.generateAuditLog(
+			await self.generateAuditLog(
 				title="User server unmuted", color=AuditColor.MODIFY, author=member,
 				items=[
 					{"name": "User", "value": member.mention},

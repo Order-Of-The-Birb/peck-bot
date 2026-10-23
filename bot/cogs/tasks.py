@@ -4,16 +4,18 @@ import asyncio, logging, discord
 from discord.ext import commands, tasks
 from datetime import datetime, timedelta, UTC, time
 from typing import TYPE_CHECKING
+
+from utils import management
 if TYPE_CHECKING:
-	from utils.bot import Bot
+	from bot.client import Bot
 # ChannelIDs, RoleIDs, CategoryIDs
 # owner_only, officer_only, members_only, debug_only
-from utils.bot import ChannelIDs, RoleIDs, debug_only
+from bot.client import ChannelIDs, RoleIDs, debug_only
 #import utils.generic as genericUtil
 #import utils.time as timeUtil
 import utils.wt as wtUtil
 import shared
-from modules import thunderapi, management
+from utils import thunderapi
 
 # "utils.generic", "utils.time", "utils.wt"
 __reload_deps__ = ("utils.wt", "utils.time")
