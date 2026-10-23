@@ -1,10 +1,9 @@
-*.db-journal
-__pycache__
-*.pyc
 /.venv
 /.vscode
-/logs
-.env
-news.json
-*.bkp
 .codex
+
+__pycache__
+*.pyc
+
+*.bkp
+.env

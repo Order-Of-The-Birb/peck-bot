@@ -1,0 +1,423 @@
+from __future__ import annotations
+import logging, requests, re
+from concurrent.futures import ThreadPoolExecutor
+from bs4 import BeautifulSoup
+from urllib.parse import quote
+from json import loads
+from time import sleep
+from datetime import datetime, UTC
+from email.utils import parsedate_to_datetime
+from functools import cache
+from typing import TYPE_CHECKING
+from contextlib import asynccontextmanager
+if __name__ == "__main__":
+	from os import path
+	from sys import path as sys_path
+	sys_path.append(path.abspath(path.join(path.dirname(__file__), '..')))
+from utils.time import discord_timestamp, sqb_brackets, timestampTypes
+from utils.generic import httperror
+from utils.resources import browser_slot
+if TYPE_CHECKING:
+	from bot.client import _Bot
+	from playwright.async_api import Page as aPage
+logger = logging.getLogger(__name__)
+
+headers = {
+	"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36 OPR/117.0.0.0"
+}
+@asynccontextmanager
+async def _closing_browser_resource(resource):
+	"""Preserve the first error or cancellation; surface close failures after successful use."""
+	failed = False
+	try:
+		yield resource
+	except BaseException:
+		failed = True
+		raise
+	finally:
+		try:
+			await resource.close()
+		except BaseException:
+			if not failed:
+				raise
+			logger.warning("Could not close %s while handling an earlier error", type(resource).__name__, exc_info=True)
+
+class SQBLookupError(LookupError):
+	"""The leaderboard could not be searched reliably for the squadron."""
+
+class _SQBRateLimitError(SQBLookupError):
+	"""The lookup must stop requesting further leaderboard pages."""
+
+def _retry_after_seconds(value:str) -> float:
+	value = (value or "").strip()
+	if re.fullmatch(r"[0-9]+", value):
+		return float(value)
+	try:
+		retry_at = parsedate_to_datetime(value)
+		if retry_at.tzinfo is None:
+			retry_at = retry_at.replace(tzinfo=UTC)
+		return max(0.0, (retry_at - datetime.now(UTC)).total_seconds())
+	except (TypeError, ValueError, OverflowError):
+		return 1.0
+
+class SQBData:
+	class _astat:
+		dr_era5:int
+		deaths:int
+		ftime:int
+		gkills:int
+		battles:int
+		wins:int
+		akills:int
+		activity:int
+		clan_activity_by_periods:int
+		def __init__(self, astat:dict[str, int]):
+			self.dr_era5 = astat.get("dr_era5_hist", 0)
+			self.deaths = astat.get("deaths_hist", 0)
+			self.ftime = astat.get("ftime_hist", 0)
+			self.gkills = astat.get("gkills_hist", 0)
+			self.battles = astat.get("battles_hist", 0)
+			self.wins = astat.get("wins_hist", 0)
+			self.akills = astat.get("akills_hist", 0)
+			self.activity = astat.get("activity", 0)
+			self.clan_activity_by_periods = astat.get("clan_activity_by_periods", 0)
+	pos:int
+	_id:int
+	announcement:str
+	autoaccept:bool
+	cdate:datetime
+	changed_by_uid:int
+	changed_time:datetime
+	creator_uid:int
+	currentTagRegalia:str
+	desc:str
+	interlockid:int
+	lastPaidTag:str
+	members_cnt:int
+	membership_req:list
+	name:str
+	namel:str
+	region:str
+	slogan:str
+	tag:str
+	tagl:str
+	type:str
+	astat:_astat
+	def __init__(self, content:dict, page_num:int):
+		self.page_num = page_num
+		self.pos = content.get("pos")
+		self._id = content.get("_id")
+		self.announcement = content.get("announcement")
+		self.autoaccept = content.get("autoaccept")
+		self.cdate = content.get("cdate")
+		self.changed_by_uid = content.get("changed_by_uid")
+		self.changed_time = content.get("changed_time")
+		self.creator_uid = content.get("creator_uid")
+		self.currentTagRegalia = content.get("currentTagRegalia")
+		self.desc = content.get("desc")
+		self.interlockid = content.get("interlockid")
+		self.lastPaidTag = content.get("lastPaidTag")
+		self.members_cnt = content.get("members_cnt")
+		self.membership_req = content.get("membership_req")
+		self.name = content.get("name")
+		self.namel = content.get("namel")
+		self.region = content.get("region")
+		self.slogan = content.get("slogan")
+		self.tag = content.get("tag")
+		self.tagl = content.get("tagl")
+		self.type = content.get("type")
+		self.astat = self._astat(content.get("astat"))
+	@classmethod
+	def fetch_data(cls) -> SQBData | None:
+		"""Return a match, or None after a complete search; raise on lookup failure."""
+		def checkPage(pagenum:int):
+			retry_sleep_remaining = 5.0 # Total retry sleep budget for this page.
+			for attempt in range(3):
+				try:
+					with requests.get(f"https://warthunder.com/en/community/getclansleaderboard/dif/_hist/page/{pagenum}/sort/dr_era5", timeout=(5, 15)) as response:
+						if response.status_code != 429:
+							if not response.ok:
+								raise SQBLookupError(f"Leaderboard page {pagenum} returned HTTP {response.status_code}")
+							data = loads(response.text)
+							break
+						retry_after = response.headers.get("Retry-After", "")
+				except (requests.RequestException, ValueError) as error:
+					raise SQBLookupError(f"Failed to read leaderboard page {pagenum}") from error
+				if attempt == 2:
+					raise _SQBRateLimitError(f"Leaderboard page {pagenum} remained rate limited after 3 attempts")
+				delay = _retry_after_seconds(retry_after)
+				if delay > retry_sleep_remaining:
+					raise _SQBRateLimitError(f"Leaderboard page {pagenum} requested a retry delay beyond its remaining sleep budget")
+				retry_sleep_remaining -= delay
+				if delay > 0:
+					sleep(delay)
+			if not isinstance(data, dict) or data.get("status") != "ok" or not isinstance(data.get("data"), list):
+				raise SQBLookupError(f"Leaderboard page {pagenum} returned an unsuccessful or invalid response")
+			# A later match is usable; malformed rows make a negative result inconclusive.
+			invalid_squadron = False
+			for squadron in data["data"]:
+				if not isinstance(squadron, dict) or type(squadron.get("_id")) is not int:
+					invalid_squadron = True
+					continue
+				if squadron["_id"] == 1061551:
+					if type(squadron.get("pos")) is not int or not all(isinstance(squadron.get(key), str) for key in ("tag", "name")):
+						raise SQBLookupError(f"Leaderboard page {pagenum} contained invalid squadron details")
+					stats = squadron.get("astat")
+					stat_keys = ("dr_era5_hist", "deaths_hist", "gkills_hist", "battles_hist", "akills_hist")
+					if not isinstance(stats, dict) or any(type(stats.get(key, 0)) is not int for key in stat_keys):
+						raise SQBLookupError(f"Leaderboard page {pagenum} contained invalid squadron statistics")
+					return cls(squadron, pagenum)
+			if invalid_squadron:
+				raise SQBLookupError(f"Leaderboard page {pagenum} contained an invalid squadron")
+			return None
+		errors:list[tuple[int, Exception]] = []
+		rate_limit_error = None
+		with ThreadPoolExecutor(max_workers=5) as executor:
+			for pagenum in range(1, 51, 5): # 20 places per page, five pages per batch
+				pages = {page: executor.submit(checkPage, page) for page in range(pagenum, pagenum+5)}
+				obj = None
+				for page, future in pages.items():
+					try:
+						result = future.result()
+						if result is not None:
+							obj = result
+					except Exception as error:
+						errors.append((page, error))
+						if isinstance(error, _SQBRateLimitError):
+							rate_limit_error = error
+				if obj is not None:
+					return obj
+				# A match in this batch wins; otherwise respect the endpoint's backoff.
+				if rate_limit_error is not None:
+					break
+				if pagenum < 46:
+					sleep(0.5)
+		if errors:
+			raise SQBLookupError(f"SQB lookup was incomplete; leaderboard pages failed: {', '.join(str(page) for page, _ in errors)}") from (rate_limit_error or errors[0][1])
+		return None # Not found in the first 20*50=1000 places
+class Squadron:
+	class Stats:
+		def __init__(self, air_kills:int, ground_kills:int, deaths:int, time:str):
+			self.air_kills = air_kills
+			self.ground_kills = ground_kills
+			self.deaths = deaths
+			self.time = time
+	class Member:
+		def __init__(self, data:tuple):
+			self.name:str = data[1]
+			self.sqb_rating:int = int(data[2])
+			self.activity:int = int(data[3])
+			self.role:str = data[4]
+			self.joindate:datetime = datetime.strptime(data[5], "%d.%m.%Y")
+	def __init__(self, squadron_name:str):
+		self.URL = f"https://warthunder.com/en/community/claninfo/{quote(squadron_name)}"
+		self._logger = logging.getLogger(__name__)
+	def __contains__(self, name:str): return name in self.GetNames()
+	def __iter__(self): return iter(self.members)
+	def __getitem__(self, index): return self.members[index]
+	def __len__(self): return self.member_count
+	def SortBySQBPoints(self, reverse:bool=True) -> list[Member]: return sorted([i for i in self.members if i.sqb_rating > 0], key=lambda x: x.sqb_rating, reverse=reverse)
+	def GetNames(self): return tuple([normalizeUsername(i.name) for i in self.members])
+	def UserInSquadron(self, name:str): return normalizeUsername(name) in self.GetNames()
+	def getMember(self, name:str) -> Member|None:
+		name = normalizeUsername(name)
+		if not self.UserInSquadron(name): return
+		for member in self.members:
+			if member.name == name:
+				return member
+		return
+	async def updateAll(self):
+		async with self.openPage() as page:
+			await self.updateMembers(page)
+			await self.updateInfo(page)
+			await self.updateStats(page)
+	async def updateMembers(self, page:aPage|None=None):
+		if page is None:
+			async with self.openPage() as page:
+				await page.wait_for_load_state("domcontentloaded")
+				content = await page.content()
+		else:
+			content = await page.content()
+		soup = BeautifulSoup(content, "html.parser")
+		try:
+			divs = [i.text.strip() for i in soup.find("div", {"class":"squadrons-members__table"}).find_all("div", {"class":"squadrons-members__grid-item"})[6:]]
+			self.members = tuple(self.Member(divs[i:i+6]) for i in range(0, len(divs), 6))
+		finally:
+			soup.decompose()
+	async def updateStats(self, page:aPage|None=None):
+		if page is None:
+			async with self.openPage() as page:
+				await page.wait_for_load_state("domcontentloaded")
+				content = await page.content()
+		else:
+			content = await page.content()
+		soup = BeautifulSoup(content, "html.parser")
+		try:
+			top = soup.find("div", {"class":"squadrons-profile__header-wrapper"})
+			_sqb_stats = top.find("div", {"class":"squadrons-profile__header-stat"}).find_all("ul")[1].find_all("li", {"class":"squadrons-stat__item-value"})[1:]
+			self.sqb = self.Stats(
+				int(_sqb_stats[0].text.strip()),
+				int(_sqb_stats[1].text.strip()),
+				int(_sqb_stats[2].text.strip()),
+				_sqb_stats[3].text.strip()
+			)
+			squadron_rating = top.find("div", {"class":"squadrons-profile__header-aside"}).find("div", {"class":"squadrons-counter__count-wrapper"}).find_all("div", {"class":"squadrons-counter__item"})
+			if (sqb_rating := re.search(r"\d+", squadron_rating[0].text)) is None:
+				logger.debug("Failed to obtain SQB rating")
+			else:
+				self.sqb_rating = int(sqb_rating.group(0).strip())
+			if (activity := re.search(r"\d+", squadron_rating[1].text)) is None:
+				logger.debug("Failed to obtain activity")
+			else:
+				self.activity = int(activity.group(0).strip())
+		finally:
+			soup.decompose()
+	async def updateInfo(self, page:aPage|None=None):
+		if page is None:
+			async with self.openPage() as page:
+				await page.wait_for_load_state("domcontentloaded")
+				content = await page.content()
+		else:
+			content = await page.content()
+		soup = BeautifulSoup(content, "html.parser")
+		try:
+			top = soup.find("div", {"class":"squadrons-profile__header-wrapper"})
+			squadron_info = top.find("div", {"class":"squadrons-info__content-wrapper"})
+			squadron_name_tag = squadron_info.find("div", {"class":"squadrons-info__title"}).text.strip().split(" ")
+			self.squadron_name = " ".join(squadron_name_tag[1:])
+			self.squadron_tag = squadron_name_tag[0]
+			self.member_count = int(squadron_info.find("div", {"class":"squadrons-info__meta-item"}).text.strip().removeprefix("Number of players: "))
+			self.squadron_description = squadron_info.find("div", {"class":"squadrons-info__description--full"}).text.strip()
+			self.creation_date = datetime.strptime(squadron_info.find("div", {"class":"squadrons-info__meta-item--date"}).text.strip().removeprefix("date of creation: "), "%d.%m.%Y")
+		finally:
+			soup.decompose()
+	@asynccontextmanager
+	async def openPage(self):
+		from playwright.async_api import async_playwright
+		async with browser_slot, async_playwright() as p:
+			async with _closing_browser_resource(await p.firefox.launch(headless=True)) as browser:
+				async with _closing_browser_resource(await browser.new_context(ignore_https_errors=True)) as context:
+					# Disable images (performance + CF friendliness)
+					await context.route("**/*", lambda route: (route.abort() if route.request.resource_type == "image" else route.continue_()))
+					page = await context.new_page()
+					await page.goto(self.URL, wait_until="domcontentloaded")
+					yield page
+@cache
+def _parse_sqb_weeks() -> list[dict[str, datetime|float]]:
+	URL = "https://forum.warthunder.com/t/season-schedule-for-squadron-battles/4446"
+	response = requests.get(URL, headers=headers)
+	if response.status_code != 200:
+		raise LookupError(f"WT Forums gave back an error: {response.status_code} ({httperror(response)})")
+	post = str(BeautifulSoup(response.text, 'html.parser').find("div", class_="post").find_all("p")[1]).removeprefix("<p>").removesuffix("</p>").replace("<br/>","").split("\n")
+
+	rn = datetime.now(UTC)
+	weeks = []
+	for num, week in enumerate(post):
+		week_number = "Afterward"
+		main_regex = re.search(r"(([0-9]+) *(st|nd|rd|th|) week|) мах (BR|БР) ([0-9.]+) \(([0-9.]+)\D+([0-9.]+)\)", week, re.IGNORECASE)
+		if num != len(post)-1:
+			week_number = main_regex.group(1)
+			append_numbering = {"1":"st","2":"nd","3":"rd"}
+			if not any(i in week_number for i in [*append_numbering.values(), "th"]) and main_regex.group(3) is not None:
+				_ = main_regex.group(2)
+				week_number = week_number.replace(_, f"{_}{append_numbering.get(_[-1], "th")}")
+		br = float(main_regex.group(5))
+		start_time = datetime.strptime(f"{main_regex.group(6)}.{rn.year}", "%d.%m.%Y").replace(hour=sqb_brackets[0][0].hour, minute=0, second=0, tzinfo=UTC)
+		end_time = datetime.strptime(f"{main_regex.group(7)}.{rn.year}", "%d.%m.%Y").replace(hour=sqb_brackets[1][1].hour, minute=0, second=0, tzinfo=UTC)
+		weeks.append({
+			"week": week_number,
+			"br": br,
+			"start": start_time,
+			"end": end_time
+		})
+	return weeks
+class sqbBracket:
+	name: str
+	start: datetime
+	end: datetime
+	br: float
+	def __init__(self, week:dict[str, datetime|float]):
+		self.name = week.get("week")
+		self.start = week.get("start")
+		self.end = week.get("end")
+		self.br = week.get("br")
+def get_sqb_season() -> list[sqbBracket]:
+	weeks = _parse_sqb_weeks()
+	return [sqbBracket(week) for week in weeks]
+def get_sqb_br(other_date:datetime|None = None) -> sqbBracket|None:
+	"""Gets the BR of a given day of SQB. Will get today if no date is given."""
+	if not other_date: rn = datetime.now(UTC)
+	else: rn = other_date.astimezone(UTC)
+	weeks = _parse_sqb_weeks()
+	for week in weeks:
+		if week["start"] <= rn < week["end"]:
+			return sqbBracket(week)
+	return None
+def get_user_ids(*usernames:str) -> dict[str, int]:
+	raise DeprecationWarning("This function is deprecated as the endpoint has been shutdown. For progress on the new API check https://github.com/Order-Of-The-Birb/ThunderAPI")
+	logger = logging.getLogger(__name__)
+	result:dict[str, int] = {}
+	session = requests.Session()
+	for username in usernames:
+		response = session.get(f"https://api.thunderinsights.dk/v1/users/direct/search/?nick={username}&limit=10")
+		if not response.ok:
+			if response.status_code == 500:
+				logger.debug(f"User '{username}' doesn't seem to exist anymore")
+				result[username] = None
+				continue
+			raise ValueError(f"Failed to look up gaijin ID of user '{username}' (HTTP {response.status_code}, \"{httperror(response)}\")")
+		data:list[dict[str, int|str]] = response.json()
+		normalizedUsername = normalizeUsername(username)
+		for user in data:
+			found_username = user.get("nick")
+			if found_username is None: continue
+			if found_username == username or normalizeUsername(found_username) == normalizedUsername: # Normalizing for database lookups (database doesn't store @psn and @live)
+				result[username] = int(user["userid"])
+				break
+		else:
+			result[username] = None
+	return result
+def normalizeUsername(name: str) -> str|None:
+	match = re.fullmatch(r"([\w-](?:[\w -]{1,14}[\w-])?)(?:@(psn|live))?", name)
+	if not match: return None
+	return match.group(1)
+async def userInReplay(username:str, replay_id:int|str, login:'_Bot.GaijinLogin') -> bool:
+	from playwright.async_api import async_playwright
+	username = normalizeUsername(username)
+	if isinstance(replay_id, str):
+		replay_id = int(replay_id, 16 if any(c in "abcdefABCDEF" for c in replay_id) else 10) # convert from HEX to DEC
+	async def login_and_prepare(page:aPage):
+		await page.wait_for_selector("form#js-form", timeout=15000)
+		await page.fill("input#email", login.email)
+		await page.fill("input#password", login.password)
+		await page.click("div.form__row > button[type='submit']")
+	async def block_images(route):
+		if route.request.resource_type == "image":
+			await route.abort()
+			return
+		await route.continue_()
+	async with browser_slot, async_playwright() as p:
+		async with _closing_browser_resource(await p.firefox.launch(headless=__name__ != "__main__")) as browser:
+			async with _closing_browser_resource(await browser.new_context(ignore_https_errors=True)) as context:
+				await context.route("**/*", block_images)
+				page = await context.new_page()
+				await page.goto(f"https://warthunder.com/en/tournament/replay/{replay_id}", wait_until="domcontentloaded")
+				await login_and_prepare(page)
+				await page.wait_for_function(
+					"location.hostname.includes('warthunder.com')",
+					timeout=30000
+				)
+				await page.wait_for_selector("div#wtVueApp", timeout=15000)
+				await page.wait_for_load_state("networkidle")
+				html = await page.content()
+	soup = BeautifulSoup(html, 'html.parser')
+	teams = soup.select("div[class*='_resultItemNames_1umbu_']", limit=2)
+	if len(teams) < 2:
+		raise ValueError("Somehow the provided replay URL has less than 2 teams")
+	for team in teams:
+		_ = team.select("ul>li")
+		for userEntry in _:
+			_2 = userEntry.select_one("div[class*='_resultItemNames__name_1umbu_']")
+			if normalizeUsername(_2.text) == username:
+				return True
+	return False
