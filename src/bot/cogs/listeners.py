@@ -12,7 +12,7 @@ import utils.generic as genericUtil
 import utils.newsAPI as NewsAPI
 import utils.time as timeUtil
 
-# "utils.generic", "utils.helper",
+# "utils.generic", "utils.media",
 # "utils.memory", "utils.network", "utils.newsAPI",
 # "utils.resources", "utils.thunderapi", "utils.time"
 # "bot.modals", "bot.client", "bot.config"
@@ -101,11 +101,11 @@ class Listeners(commands.Cog):
 		config = await Config.get(message.guild.id)
 		if config is None:
 			return
-		if message.channel ==config.get(Config.Channels.WTNEWS):
+		if message.channel == config.get(Config.Channels.WTNEWS):
 			if "warthunder.com" not in message.content.lower():
 				await message.delete()
 		elif "clip" in message.content.lower():
-			CLIPS_CATEGORY =config.get(Config.Categories.CLIPS)
+			CLIPS_CATEGORY = config.get(Config.Categories.CLIPS)
 			subjects = CLIPS_CATEGORY.text_channels
 			subject = next((
 				s for s in subjects
@@ -177,7 +177,7 @@ class Listeners(commands.Cog):
 			return
 
 		if event.name.startswith("["):
-			announcementsCh =config.get(Config.Channels.ANNOUNCEMENTS)
+			announcementsCh = config.get(Config.Channels.ANNOUNCEMENTS)
 			if event.name.lower().startswith("[event]"):
 				await announcementsCh.send(f"A new event is starting soon:tm:!\n{event.url}")
 			if event.name.lower().startswith("[sqb]"):
@@ -221,4 +221,4 @@ class Listeners(commands.Cog):
 	# endregion
 
 async def setup(bot: Client._Bot):
-	 await bot.add_cog(Listeners())
+	await bot.add_cog(Listeners())

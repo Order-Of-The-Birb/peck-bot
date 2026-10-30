@@ -6,7 +6,7 @@ from discord.ext import commands
 import bot.client as Client
 import bot.config as Config
 
-# "utils.generic", "utils.helper",
+# "utils.generic", "utils.media",
 # "utils.memory", "utils.network", "utils.newsAPI",
 # "utils.resources", "utils.thunderapi", "utils.time"
 # "bot.modals", "bot.client", "bot.config"
@@ -44,4 +44,4 @@ class ContextMenuCog(commands.Cog):
 			Client.BOT.tree.remove_command(item.name, type=item.type)
 
 async def setup(bot: Client._Bot):
-	 await bot.add_cog(ContextMenuCog())
+	await bot.add_cog(ContextMenuCog())

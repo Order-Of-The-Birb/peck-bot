@@ -8,10 +8,9 @@ import bot.client as Client
 import bot.config as Config
 
 # owner_only, officer_only, members_only, debug_only
-from bot.client import admin_only
-from bot.modals import AddAlias, CreateClipCh
+from bot.modals import Modals
 
-# "utils.generic", "utils.helper",
+# "utils.generic", "utils.media",
 # "utils.memory", "utils.network", "utils.newsAPI",
 # "utils.resources", "utils.thunderapi", "utils.time"
 # "bot.modals", "bot.client", "bot.config"
@@ -24,16 +23,16 @@ class ClipsCog(commands.GroupCog, group_name="clips"):
 
 	@discord.app_commands.command(name="upload")
 	async def upload_clip(self, interaction:discord.Interaction):
-		await interaction.response.send_modal(CreateClipCh())
+		await interaction.response.send_modal(Modals.CreateClipCh())
 
 	@discord.app_commands.command(name="add_alias")
-	@admin_only()
+	@Client.admin_only()
 	async def add_alias(self, interaction:discord.Interaction):
-		await interaction.response.send_modal(AddAlias())
+		await interaction.response.send_modal(Modals.AddAlias())
 
 	@discord.app_commands.command(name="remove_alias")
 	@discord.app_commands.default_permissions(manage_channels=True)
-	@admin_only()
+	@Client.admin_only()
 	async def remove_alias(self, interaction:discord.Interaction, alias:str, user:discord.User):
 		await interaction.response.defer(thinking=True, ephemeral=True)
 
@@ -41,7 +40,7 @@ class ClipsCog(commands.GroupCog, group_name="clips"):
 		if config is None:
 			await interaction.edit_original_response(content="An error occurred while loading server data")
 			return
-		category =config.get(Config.Categories.CLIPS)
+		category = config.get(Config.Channels.CLIPS)
 		if category is None:
 			raise LookupError(f"Could not find clips category in guild {interaction.guild_id}")
 
@@ -67,4 +66,4 @@ class ClipsCog(commands.GroupCog, group_name="clips"):
 			return
 
 async def setup(bot: Client._Bot):
-	 await bot.add_cog(ClipsCog())
+	await bot.add_cog(ClipsCog())

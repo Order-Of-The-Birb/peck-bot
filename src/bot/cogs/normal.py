@@ -8,24 +8,19 @@ from psutil import Process as psutilProcess
 from psutil import virtual_memory
 from psutil._common import bytes2human
 
-if __name__ == "__main__":
-	from os import path
-	from sys import path as sys_path
-	sys_path.append(path.abspath(path.join(path.dirname(__file__), '..')))
-
 import bot.client as Client
 import bot.config as Config
 import utils.generic as genericUtil
 import utils.media as Media
 import utils.thunderapi as ThunderAPI
 import utils.time as timeUtil
-from bot.modals import ReportModal
+from bot.modals import Modals
 
-# "utils.generic", "utils.helper",
+# "utils.generic", "utils.helper", "utils.media",
 # "utils.memory", "utils.network", "utils.newsAPI",
 # "utils.resources", "utils.thunderapi", "utils.time"
 # "bot.modals", "bot.client", "bot.config"
-__reload_deps__ = ("bot.client", "bot.config", "utils.generic", "utils.time",  "bot.modals", "utils.thunderapi")
+__reload_deps__ = ("bot.client", "bot.config", "utils.generic", "utils.time", "bot.modals", "utils.thunderapi", "utils.media")
 
 def toSelectList(names:list[str]) -> list[discord.SelectOption]: return [discord.SelectOption(label=name) for name in names]
 class NormalCog(commands.Cog):
@@ -37,7 +32,7 @@ class NormalCog(commands.Cog):
 	@discord.app_commands.guild_only()
 	async def report(self, interaction: discord.Interaction):
 
-		await interaction.response.send_modal(ReportModal(Client.BOT))
+		await interaction.response.send_modal(Modals.ReportModal(Client.BOT))
 
 	@discord.app_commands.command()
 	async def info(self, interaction:discord.Interaction):
@@ -92,7 +87,9 @@ class NormalCog(commands.Cog):
 		if len(topmembers) == 0:
 			await interaction.edit_original_response(content="There seems to be nobody in the squadron with any SQB points.")
 			return
-		if len(topmembers) > number: topmembers = topmembers[:number]
+		if len(topmembers) > number:
+			topmembers = topmembers[:number]
+
 		top_10_message = f"Top {len(topmembers)} Users:\n"
 		for i, user in enumerate(topmembers, 1):
 			top_10_message += f"{i}. {genericUtil.demarkdownify(user.name)}: {user.sqb_rating}\n"
@@ -191,4 +188,4 @@ class NormalCog(commands.Cog):
 		)
 
 async def setup(bot: Client._Bot):
-	 await bot.add_cog(NormalCog())
+	await bot.add_cog(NormalCog())

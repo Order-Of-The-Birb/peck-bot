@@ -16,7 +16,7 @@ from discord.ext import commands
 import bot.client as Client
 import bot.config as Config
 
-# "utils.generic", "utils.helper",
+# "utils.generic", "utils.media",
 # "utils.memory", "utils.network", "utils.newsAPI",
 # "utils.resources", "utils.thunderapi", "utils.time"
 # "bot.modals", "bot.client", "bot.config"
@@ -177,7 +177,7 @@ class auditLogCog(commands.Cog):
 		config =await Config.get(guild)
 		if config is None:
 			return
-		channel =config.get(Config.Channels.AUDIT_LOG)
+		channel = config.get(Config.Channels.AUDIT_LOG)
 		if channel is None:
 			return
 		if items is None:
@@ -224,7 +224,8 @@ class auditLogCog(commands.Cog):
 				)
 			)
 		for item in items:
-			if item is None: continue
+			if item is None:
+				continue
 			embed.add_field(
 				name=item["name"],
 				value=item["value"],
@@ -303,32 +304,111 @@ class auditLogCog(commands.Cog):
 		auditLogEntry = await self.getAuditLogEntry(discord.AuditLogAction.channel_update, guild=after.guild, target=after)
 		if before.name != after.name:
 			await self.generateAuditLog(
-				title="Channel renamed", description=after.mention, color=AuditColor.CREATE, author=after.guild,
+				title="Channel renamed", description=after.mention, color=AuditColor.CREATE, author=auditLogEntry.user,
 				items=[
 					{"name": "Before", "value": before.name},
 					{"name": "After", "value": after.name},
 					{"name": "Moderator", "value": auditLogEntry.user.mention if auditLogEntry and auditLogEntry.user else "Unknown"}
 				],
-				footer_text=f"ID: {after.id}"
+				footer_text=auditLogEntry.user.mention
 			)
 		if before.position != after.position:
 			await self.generateAuditLog(
-				title="Channel moved", description=after.mention, color=AuditColor.CREATE, author=after.guild,
+				title="Channel moved", description=after.mention, color=AuditColor.CREATE, author=auditLogEntry.user,
 				items=[
-					{"name": "Before", "value": before.position},
-					{"name": "After", "value": after.position},
+					{"name": "Position before", "value": before.position},
+					{"name": "Position after", "value": after.position},
 					{"name": "Moderator", "value": auditLogEntry.user.mention if auditLogEntry and auditLogEntry.user else "Unknown"}
 				],
 				footer_text=f"ID: {after.id}"
 			)
+		removed_overwrites: dict[int, set[str]] = {}
+		changed_overwrites: dict[int, set[str]] = {}
+		added_overwrites: dict[int, set[str]] = {}
 		for obj, afterPerms in after.overwrites.items():
-			if (beforePerms := before.overwrites_for(obj)) == after.overwrites_for(obj): continue
-			if beforePerms.is_empty() and not afterPerms.is_empty():
-				pass
-			else:
-				pass
-		for obj, beforePerms in [(i, j) for i, j in before.overwrites.items() if after.overwrites_for(i).is_empty()]:
-			...
+			beforePerms = before.overwrites_for(obj)
+			if beforePerms == afterPerms:
+				continue
+			for permission, afterValue in afterPerms:
+				beforeValue: bool | None = getattr(beforePerms, permission, None)
+				if beforeValue == afterValue:
+					continue
+				if beforeValue is None and afterValue is not None:
+					added_overwrites[obj.id].add(permission)
+				elif beforeValue is not None and afterValue is None:
+					removed_overwrites[obj.id].add(permission)
+				elif beforeValue != afterValue:
+					changed_overwrites[obj.id].add(permission)
+		for obj, beforePerms in before.overwrites.items():
+			afterPerms = after.overwrites_for(obj)
+			if afterPerms == beforePerms:
+				continue
+			for permission, beforeValue in beforePerms:
+				afterValue: bool | None = getattr(afterPerms, permission, None)
+				if beforeValue == afterValue:
+					continue
+				elif beforeValue is None and afterValue is not None:
+					added_overwrites[obj.id].add(permission)
+				elif beforeValue is not None and afterValue is None:
+					removed_overwrites[obj.id].add(permission)
+				elif beforeValue != afterValue:
+					changed_overwrites[obj.id].add(permission)
+
+		for roleid, changed in added_overwrites.items():
+			role = after.guild.get_role(roleid)
+			if role is None:
+				continue
+
+			overwrites = after.overwrites_for(role)
+			changes = [{"name": perm.capitalize(), "value": "Yes" if (_ := getattr(overwrites, perm, None)) else ("No" if _ is not None else "Unset")} for perm in changed]
+
+			prev = 0
+			for i in range(0, len(changes), 25):
+				await self.generateAuditLog(
+					title="Permission overwrite added", description=role.mention, color=AuditColor.CREATE,
+					author=auditLogEntry.user,
+					items=changes[prev:i],
+					footer_text=f"ID: {role.id}"
+				)
+				prev = i
+
+		for roleid, changed in changed_overwrites.items():
+			role = after.guild.get_role(roleid)
+			if role is None:
+				continue
+
+			overwrites = after.overwrites_for(role)
+			changes = [{"name": perm.capitalize(), "value": "Yes" if (_ := getattr(overwrites, perm, None)) else ("No" if _ is not None else "Unset")} for perm in changed]
+
+
+			prev = 0
+			for i in range(0, len(changes), 25):
+				await self.generateAuditLog(
+					title="Permission overwrite changed", description=role.mention, color=AuditColor.CREATE,
+					author=auditLogEntry.user,
+					items=changes,
+					footer_text=f"ID: {role.id}"
+				)
+				prev = i
+
+		for roleid, changed in removed_overwrites.items():
+			role = after.guild.get_role(roleid)
+			if role is None:
+				continue
+
+			overwrites = before.overwrites_for(role)
+			changes = [{"name": perm.capitalize(), "value": "Yes" if (_ := getattr(overwrites, perm, None)) else ("No" if _ is not None else "Unset")} for perm in changed]
+
+
+			prev = 0
+			for i in range(0, len(changes), 25):
+				await self.generateAuditLog(
+					title="Permission overwrite removed", description=role.mention, color=AuditColor.DELETE,
+					author=auditLogEntry.user,
+					items=changes,
+					footer_text=f"ID: {role.id}"
+				)
+				prev = i
 	# on_guild_channel_pins_update(channel, last_pin)
 	# endregion
 	# region Guilds
@@ -428,7 +508,8 @@ class auditLogCog(commands.Cog):
 	# region Messages
 	@commands.Cog.listener()
 	async def on_message_edit(self, before:discord.Message, after:discord.Message):
-		if after.author.bot: return
+		if after.author.bot:
+			return
 		if before.content != after.content:
 			await self.generateAuditLog(
 				title="Message edited", description=f"In channel {after.channel.mention}", author=after.author, url=after.jump_url, color=AuditColor.MODIFY,
@@ -459,7 +540,8 @@ class auditLogCog(commands.Cog):
 			)
 	@commands.Cog.listener()
 	async def on_message_delete(self, message:discord.Message):
-		if message.author.bot or isinstance(message.channel, discord.DMChannel): return
+		if message.author.bot or isinstance(message.channel, discord.DMChannel):
+			return
 		auditLogEntry = await self.getAuditLogEntry(discord.AuditLogAction.message_delete, guild=message.guild)
 		await self.generateAuditLog(
 			title="Message deleted", author=message.author, color=AuditColor.DELETE,

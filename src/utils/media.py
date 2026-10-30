@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 async def convertImageToGif(guild: discord.Guild, image:discord.Attachment, name_appendix: str | None = None) -> discord.File:
 	allowed_types = ["png", "jpg", "jpeg", "webp"]
 	file_extension = image.filename.split(".")[-1].lower()
-	if not file_extension in allowed_types:
+	if file_extension not in allowed_types:
 		raise ValueError(f"File was not provided in a supported format.\nThe following formats are supported: {", ".join(allowed_types)}")
 	if image.size > guild.filesize_limit:
 		raise ValueError(f"File is too large to convert. The maximum supported size is {guild.filesize_limit // (1024 * 1024)}MB.")
@@ -25,7 +25,7 @@ async def convertImageToGif(guild: discord.Guild, image:discord.Attachment, name
 		image_data = await image.read()
 	except discord.HTTPException as e:
 		logger.error(f"Failed to download attachment {image.filename}: {e}")
-		raise ValueError("The image could not be downloaded from Discord.")
+		raise ValueError("The image could not be downloaded from Discord.") from e
 	async def encode() -> BytesIO:
 		with tempfile.TemporaryDirectory() as tempdir:
 			input_path = path.join(tempdir, f"input.{file_extension}")
@@ -57,12 +57,12 @@ async def convertImageToGif(guild: discord.Guild, image:discord.Attachment, name
 				)
 			except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
 				logger.error(f"ffmpeg failed to convert {image.filename}: {e.stderr or e}")
-				raise ValueError("The image could not be converted. It may be corrupt or in a format ffmpeg cannot decode.")
-			except FileNotFoundError:
+				raise ValueError("The image could not be converted. It may be corrupt or in a format ffmpeg cannot decode.") from e
+			except FileNotFoundError as e:
 				logger.error("ffmpeg was not found, image conversion is unavailable")
-				raise ValueError("Image conversion is currently unavailable.")
+				raise ValueError("Image conversion is currently unavailable.") from e
 			# Reject oversized output before allocating a buffer for the whole GIF.
-			if path.getsize(output_path) > guild.filesize_limit:
+			if await asyncio.to_thread(path.getsize, output_path) > guild.filesize_limit:
 				raise ValueError("The converted GIF is too large to upload.")
 			async with await anyio.open_file(output_path, "rb") as file:
 				return BytesIO(file.read())
@@ -77,7 +77,8 @@ async def convertImageToGif(guild: discord.Guild, image:discord.Attachment, name
 # region Media Downloaders
 async def medalDownload(guild: discord.Guild, share_url:str) -> discord.File:
 	URL_REGEX = re.compile(r"https://medal.tv/games/.+/clips/.+")
-	if URL_REGEX.fullmatch(share_url) is None: raise LookupError("Given Medal URL is invalid.")
+	if URL_REGEX.fullmatch(share_url) is None:
+		raise LookupError("Given Medal URL is invalid.")
 	async with aiohttp.ClientSession() as session:
 		async with session.get(share_url) as response:
 			if response.status != 200:

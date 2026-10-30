@@ -5,11 +5,11 @@ from discord.ext import commands
 
 import bot.client as Client
 
-# "utils.generic", "utils.helper",
+# "utils.generic", "utils.media",
 # "utils.memory", "utils.network", "utils.newsAPI",
 # "utils.resources", "utils.thunderapi", "utils.time"
 # "bot.modals", "bot.client", "bot.config"
-__reload_deps__ = ("bot.client", "bot.config")
+__reload_deps__ = ("bot.client")
 
 class AdminCog(commands.Cog):
 	def __init__(self):

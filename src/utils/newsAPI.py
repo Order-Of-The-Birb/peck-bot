@@ -1,17 +1,11 @@
 from __future__ import annotations
 
+from asyncio import Task
 from collections.abc import Coroutine
 from datetime import datetime
 from typing import Any, Literal, NoReturn
 
 from discord import Embed
-
-if __name__ == "__main__":
-	from os import path
-	from sys import path as sys_path
-	sys_path.append(path.abspath(path.join(path.dirname(__file__), '..')))
-
-from asyncio import Task
 
 import bot.client as Client
 from utils.models.thunderapi.generic import NewsModel

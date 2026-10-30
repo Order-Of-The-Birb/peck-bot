@@ -12,11 +12,11 @@ import utils.thunderapi as ThunderAPI
 from bot.cogs import EXTENSIONS
 from utils.memory import cache_counts, process_memory
 
-# "utils.generic", "utils.helper",
+# "utils.generic", "utils.media",
 # "utils.memory", "utils.network", "utils.newsAPI",
 # "utils.resources", "utils.thunderapi", "utils.time"
 # "bot.modals", "bot.client", "bot.config"
-__reload_deps__ = ("bot.client", "bot.config")
+__reload_deps__ = ("bot.client", "utils.thunderapi", "utils.newsAPI")
 
 async def reload_autocomplete(interaction: discord.Interaction, current: str):
 	options = [

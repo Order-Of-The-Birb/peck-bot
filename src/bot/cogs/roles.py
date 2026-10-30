@@ -8,7 +8,7 @@ from discord.ext import commands
 import bot.client as Client
 import bot.config as Config
 
-# "utils.generic", "utils.helper",
+# "utils.generic", "utils.media",
 # "utils.memory", "utils.network", "utils.newsAPI",
 # "utils.resources", "utils.thunderapi", "utils.time"
 # "bot.modals", "bot.client", "bot.config"
@@ -45,7 +45,7 @@ class RolesCog(commands.GroupCog, group_name="role"):
 				return
 
 		if role == 1:
-			pingrole =config.get(Config.Roles.PING)
+			pingrole = config.get(Config.Roles.PING)
 			if pingrole in interaction.user.roles:
 				await interaction.edit_original_response(content="You already have the role. If you wish to remove it use the `/role remove` command!")
 				return
@@ -58,7 +58,7 @@ class RolesCog(commands.GroupCog, group_name="role"):
 				return
 			main_profile = min(main_profile, key=lambda u: (u.joined_at is None, u.joined_at))
 			x_time_ago = (datetime.now(UTC) - old_timer_interval).date()
-			old_timer =config.get(Config.Roles.OLD_TIMER)
+			old_timer = config.get(Config.Roles.OLD_TIMER)
 			if main_profile.joined_at is None:
 				await interaction.edit_original_response(content="You seem to not have a join date saved in the database. Please contact an admin about this.")
 			elif interaction.user.get_role(old_timer.id) is not None:
@@ -70,7 +70,7 @@ class RolesCog(commands.GroupCog, group_name="role"):
 				await interaction.edit_original_response(content="Role given.")
 				embed = discord.Embed(title="Old timer role promotion")
 				embed.add_field(name="Discord user", value=interaction.user.mention)
-				tmp =config.get(Config.Channels.LOGS)
+				tmp = config.get(Config.Channels.LOGS)
 				await tmp.send(embed=embed)
 
 	@discord.app_commands.command(name="remove")
@@ -86,7 +86,7 @@ class RolesCog(commands.GroupCog, group_name="role"):
 			return
 
 		if role == 1:
-			pingrole =config.get(Config.Roles.PING)
+			pingrole = config.get(Config.Roles.PING)
 			if pingrole not in interaction.user.roles:
 				await interaction.edit_original_response(content="You don't have the role. If you wish to get it use the `/role get` command!")
 				return

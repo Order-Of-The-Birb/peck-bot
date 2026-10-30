@@ -6,18 +6,15 @@ from discord.ext import commands, tasks
 
 import bot.client as Client
 import bot.config as Config
-import bot.modals as Modals
 import utils.thunderapi as ThunderAPI
-
-# ChannelIDs, RoleIDs, CategoryIDs
-# owner_only, officer_only, members_only, debug_only
 import utils.time as timeUtil
+from bot.modals import Views
 
-# "utils.generic", "utils.helper",
+# "utils.generic", "utils.media",
 # "utils.memory", "utils.network", "utils.newsAPI",
 # "utils.resources", "utils.thunderapi", "utils.time"
 # "bot.modals", "bot.client", "bot.config"
-__reload_deps__ = ("bot.client", "bot.config", "bot.modals", "utils.time")
+__reload_deps__ = ("bot.client", "bot.config", "bot.modals", "utils.time", "utils.thunderapi")
 
 class SQBCog(commands.GroupCog, group_name="sqb"):
 	posting_task: tasks.Loop
@@ -36,7 +33,7 @@ class SQBCog(commands.GroupCog, group_name="sqb"):
 			await interaction.response.send_message(content="This server is not yet configured.")
 			return False
 
-		member_role =config.get(Config.Roles.MEMBER)
+		member_role = config.get(Config.Roles.MEMBER)
 		return member_role in interaction.user.roles
 
 	asked_users: dict[int, dict[int, datetime]] # guild: {userid: asked_at}
@@ -93,7 +90,7 @@ class SQBCog(commands.GroupCog, group_name="sqb"):
 			self.asked_users[interaction.guild_id][interaction2.user.id] = datetime.now(UTC)
 			return True
 		try:
-			await dc_user2.send(message, view=Modals.genericButtons(acceptFunc=accept, denyFunc=deny, acceptLabel="Accept Invitation", denyLabel="Deny Invitation", removeButtonsAfter=True))
+			await dc_user2.send(message, view=Views.genericButtons(acceptFunc=accept, denyFunc=deny, acceptLabel="Accept Invitation", denyLabel="Deny Invitation", removeButtonsAfter=True))
 			await interaction.edit_original_response(content=f"Message sent to {dc_user2.name} (War Thunder username: {user.username})")
 		except discord.Forbidden:
 			await interaction.edit_original_response(content=f"Could not send DM to {dc_user2.name} (War Thunder username: {user.username}).")
@@ -173,4 +170,4 @@ class SQBCog(commands.GroupCog, group_name="sqb"):
 	#endregion
 
 async def setup(bot: Client._Bot):
-	 await bot.add_cog(SQBCog())
+	await bot.add_cog(SQBCog())

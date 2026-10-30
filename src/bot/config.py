@@ -24,6 +24,7 @@ class Channels(StrEnum):
 	SQB = "SQB"
 	PROPAGANDA = "PROPAGANDA"
 	WTNEWS = "WTNEWS"
+	CLIPS = "CLIPS"
 class Roles(StrEnum):
 	MEMBER = "MEMBER"
 	EX_MEMBER = "EX_MEMBER"
@@ -34,7 +35,6 @@ class Roles(StrEnum):
 	APPLICANT = "APPLICANT"
 	COMMON = "COMMON"
 class Categories(StrEnum):
-	CLIPS = "CLIPS"
 	SQUAD_VC = "SQUAD_VC"
 
 class GuildConfig:
@@ -218,10 +218,10 @@ class GuildConfig:
 
 		return cls(
 			id=guild_id,
-			channels=config.get("channels", {}),
-			roles=config.get("roles", {}),
-			categories=config.get("categories", {}),
-			squadron_id=config.get("squadron"),
+			channels= config.get("channels", {}),
+			roles= config.get("roles", {}),
+			categories= config.get("categories", {}),
+			squadron_id= config.get("squadron"),
 			management=await cls._Management.login(config.get("squadron"))
 		)
 
@@ -234,7 +234,7 @@ class GuildConfig:
 	@overload
 	def get(self, value: Literal[Channels.ANNOUNCEMENTS, Channels.AUDIT_LOG, Channels.LOGS, Channels.SCORE]) -> discord.TextChannel | None: ...
 	@overload
-	def get(self, value: Literal[Channels.WTNEWS, Channels.PROPAGANDA]) -> discord.ForumChannel | None: ...
+	def get(self, value: Literal[Channels.WTNEWS, Channels.PROPAGANDA, Channels.CLIPS]) -> discord.ForumChannel | None: ...
 	def get(self, value: Roles|Channels|Categories):
 		if isinstance(value, Channels):
 			if value in self.__CHANNELS:

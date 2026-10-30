@@ -6,7 +6,8 @@ from fastapi import HTTPException
 from fastapi.concurrency import asynccontextmanager
 
 
-class NetworkError(HTTPException): pass
+class NetworkError(HTTPException):
+	pass
 
 _session: ClientSession | None = None
 _closing = False

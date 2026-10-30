@@ -1,0 +1,30 @@
+[project]
+name="PECK_bot"
+version = "1.0.0"
+requires-python = ">= 3.14"
+authors = [
+	{name = "Maho Yoshino", email="mahoyoshino@proton.me"}
+]
+
+[project.urls]
+Homepage = "https://discord.gg/wsn9Wcqqym"
+Repository = "https://github.com/Order-Of-The-Birb/peck-bot.git"
+Issues = "https://github.com/Order-Of-The-Birb/peck-bot/issues"
+
+[dependency-groups]
+dev = [
+	"ruff"
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py314"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["ASYNC", "BLE", "B", "E1", "E402", "E7", "E9", "F", "I", "S", "W2"]
+ignore = ["S311"]

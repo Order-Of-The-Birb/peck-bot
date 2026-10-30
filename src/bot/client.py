@@ -107,16 +107,18 @@ def owner_only():
 	return discord.app_commands.check(predicate)
 def admin_only():
 	async def predicate(interaction: discord.Interaction) -> bool:
-		if interaction.guild is None: return False
+		if interaction.guild is None:
+			return False
 		return interaction.user.guild_permissions.administrator
 	return discord.app_commands.check(predicate)
 def members_only():
 	async def predicate(interaction: discord.Interaction) -> bool:
-		if interaction.guild_id is None: return False
-		config =await Config.get(interaction.guild_id)
+		if interaction.guild_id is None:
+			return False
+		config = await Config.get(interaction.guild_id)
 		if config is None:
 			return False
-		member_role =config.get(Config.Roles.MEMBER)
+		member_role = config.get(Config.Roles.MEMBER)
 		if member_role is None:
 			raise RuntimeError(f"Could not find the member role of server {interaction.guild_id}")
 		return any(role.id == member_role.id for role in interaction.user.roles)
