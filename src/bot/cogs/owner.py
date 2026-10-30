@@ -1,18 +1,17 @@
-if __name__ == "__main__":
-	raise Exception("Start the program from the main process")
-import asyncio, logging, discord
-from discord.ext import commands
-from sys import modules as sysmodules
+import asyncio
+import logging
 
-from utils.memory import process_memory, cache_counts
+import discord
+from discord.ext import commands
 from psutil._common import bytes2human
 
-from bot.cogs import EXTENSIONS
 import bot.client as Client
+from bot.cogs import EXTENSIONS
+from utils.memory import cache_counts, process_memory
 
-# "utils.generic", "utils.helper", "utils.management",
+# "utils.generic", "utils.helper",
 # "utils.memory", "utils.network", "utils.newsAPI",
-# "utils.resources", "utils.thunderapi", "utils.time", "utils.wt"
+# "utils.resources", "utils.thunderapi", "utils.time"
 # "bot.modals", "bot.client", "bot.config"
 __reload_deps__ = ("bot.client", "bot.config")
 
@@ -30,8 +29,7 @@ class OwnerCog(commands.Cog):
 		self.logger.debug(f"{self.__class__.__name__} initialized")
 
 	async def interaction_check(self, interaction:discord.Interaction):
-
-		return
+		return interaction.user.id in [332030423913725953, 709449854371364895]
 
 	@discord.app_commands.command(name="memory", description="Inspect bot RAM and cache counts")
 	@Client.owner_only()
@@ -61,24 +59,18 @@ class OwnerCog(commands.Cog):
 		await interaction.response.defer(ephemeral=True)
 		try:
 			if extension.lower() == "all":
-				for ext in EXTENSIONS:
-					module = sysmodules.get(ext)
-					deps = getattr(module, "__reload_deps__", ())
-					await Client.BOT.reload_extension_with_deps(ext, *deps)
+				await Client.BOT.reload_module(extension)
 				await interaction.edit_original_response(content="Reloaded all cogs")
 			else:
 				full = f"discord.{extension}"
-				module = sysmodules.get(full)
-				deps = getattr(module, "__reload_deps__", ()) if module else ()
-				await Client.BOT.reload_extension_with_deps(full, *deps)
+				await Client.BOT.reload_module(full)
 				await interaction.edit_original_response(content=f"Reloaded cog '{extension}'")
-				self.logger.info(f"Reloaded cog '{extension}'")
-		except:
+		except Exception:
 			self.logger.exception(f"An error occured while reloading cog '{extension}'")
 			await interaction.edit_original_response(content=f"Failed to reload '{extension}'")
 
 	@discord.app_commands.command()
-	@owner_only()
+	@Client.owner_only()
 	async def force_sync(self, interaction:discord.Interaction):
 		await interaction.response.defer(thinking=True)
 		try:
@@ -89,5 +81,5 @@ class OwnerCog(commands.Cog):
 			self.logger.exception("An error occured while syncing")
 			await interaction.edit_original_response(content="An error occurred while syncing")
 
-async def setup(bot: '_Bot'):
-	await bot.add_cog(OwnerCog(bot))
+async def setup(bot: Client._Bot):
+	await bot.add_cog(OwnerCog())

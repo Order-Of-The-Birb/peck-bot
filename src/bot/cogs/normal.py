@@ -1,28 +1,31 @@
-if __name__ == "__main__":
-	raise Exception("Start the program from the main process")
-import discord, logging, re
+import logging
+import re
+from datetime import UTC, datetime, time, timedelta
+
+import discord
 from discord.ext import commands
-from datetime import datetime, UTC, time, timedelta
-from psutil import virtual_memory, Process as psutilProcess
+from psutil import Process as psutilProcess
+from psutil import virtual_memory
 from psutil._common import bytes2human
+
 if __name__ == "__main__":
 	from os import path
 	from sys import path as sys_path
 	sys_path.append(path.abspath(path.join(path.dirname(__file__), '..')))
 
-from bot.modals import ReportModal
-import utils.generic as genericUtil
-import utils.time as timeUtil
 import bot.client as Client
 import bot.config as Config
-import utils.management as management
+import utils.generic as genericUtil
+import utils.media as Media
 import utils.thunderapi as ThunderAPI
+import utils.time as timeUtil
+from bot.modals import ReportModal
 
-# "utils.generic", "utils.helper", "utils.management",
+# "utils.generic", "utils.helper",
 # "utils.memory", "utils.network", "utils.newsAPI",
-# "utils.resources", "utils.thunderapi", "utils.time", "utils.wt"
+# "utils.resources", "utils.thunderapi", "utils.time"
 # "bot.modals", "bot.client", "bot.config"
-__reload_deps__ = ("bot.client", "bot.config", "utils.generic", "utils.time", "utils.management", "bot.modals", "utils.thunderapi")
+__reload_deps__ = ("bot.client", "bot.config", "utils.generic", "utils.time",  "bot.modals", "utils.thunderapi")
 
 def toSelectList(names:list[str]) -> list[discord.SelectOption]: return [discord.SelectOption(label=name) for name in names]
 class NormalCog(commands.Cog):
@@ -50,10 +53,10 @@ class NormalCog(commands.Cog):
 		await interaction.response.send_message(embed=embed)
 
 	@discord.app_commands.command()
-	async def convert_to_gif(self, interaction:discord.Interaction, image:discord.Attachment):
+	async def convert_to_gif(self, interaction:discord.Interaction, image:discord.Attachment, name_appendix: str = ""):
 		await interaction.response.defer(thinking=True)
 		try:
-			file = await genericUtil.convertImageToGif(image)
+			file = await Media.convertImageToGif(image, name_appendix=name_appendix)
 		except ValueError as e:
 			await interaction.edit_original_response(content=str(e))
 			return
@@ -77,17 +80,17 @@ class NormalCog(commands.Cog):
 	async def top_members(self, interaction: discord.Interaction, number:int=8):
 		"""Requests the top `number` highest SQB Activity people from the squadron"""
 		await interaction.response.defer(thinking=True)
-		config = Config.get(interaction.guild_id)
+		config =await Config.get(interaction.guild_id)
 		if config is None:
 			await interaction.edit_original_response(content="This server wasn't configured.")
 			return
 
 		topmembers = await ThunderAPI.clan.get(config.squadron)
 		if topmembers is None:
-			await interaction.edit_original_response(content=f"There seems to be no such squadron")
+			await interaction.edit_original_response(content="There seems to be no such squadron")
 			return
 		if len(topmembers) == 0:
-			await interaction.edit_original_response(content=f"There seems to be nobody in the squadron with any SQB points.")
+			await interaction.edit_original_response(content="There seems to be nobody in the squadron with any SQB points.")
 			return
 		if len(topmembers) > number: topmembers = topmembers[:number]
 		top_10_message = f"Top {len(topmembers)} Users:\n"
@@ -107,11 +110,11 @@ class NormalCog(commands.Cog):
 			return
 		await interaction.response.defer(thinking=True, ephemeral=True)
 		try:
-			clip = await genericUtil.medalDownload(share_url)
+			clip = await Media.medalDownload(share_url)
 		except LookupError as e:
 			await interaction.edit_original_response(content=f"An error occurred while downloading the clip: {e}")
 			return
-		await interaction.followup.send(f"Here you go.", file=clip)
+		await interaction.followup.send("Here you go.", file=clip)
 	# endregion
 	# region Request Commands
 	group_requests = discord.app_commands.Group(name="request", description="For requesting user data from our database")
@@ -121,7 +124,16 @@ class NormalCog(commands.Cog):
 	async def request_wt(self, interaction: discord.Interaction, user:discord.Member):
 		"""Requests a user's War Thunder username(s) from the database"""
 		await interaction.response.defer(thinking=True)
-		if not (db_user := management.get(discord_id=user.id)):
+		config = await Config.get(interaction)
+		if config is None:
+			await interaction.edit_original_response(content="This server is not yet configured.")
+			return
+		management = config.management
+		if management is None:
+			await interaction.edit_original_response(content="This server's management token is not yet configured.")
+			return
+
+		if not (db_user := await management.get(discord_id=user.id)):
 			await interaction.edit_original_response(content="User not found")
 			return
 		await interaction.edit_original_response(content=f"User(s) found: {", ".join(f"{i.username}" for i in db_user)}")
@@ -131,6 +143,15 @@ class NormalCog(commands.Cog):
 	async def request_dc(self, interaction: discord.Interaction, user:str):
 		"""Requests a user's ID based on the WT username in the database"""
 		await interaction.response.defer(thinking=True)
+		config = await Config.get(interaction)
+		if config is None:
+			await interaction.edit_original_response(content="This server is not yet configured.")
+			return
+		management = config.management
+		if management is None:
+			await interaction.edit_original_response(content="This server's management token is not yet configured.")
+			return
+
 		if (db_user := await management.get(username=user)) is not None:
 			dcuser = interaction.guild.get_member(db_user.discord_id)
 			if dcuser is None:

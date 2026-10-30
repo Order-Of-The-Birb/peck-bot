@@ -1,18 +1,30 @@
-if __name__ == "__main__":
-	raise Exception("Start the program from the main process")
-import logging, discord
-from sys import modules as sysmodules
+import logging
+from datetime import UTC, datetime
 from importlib import reload
+from sys import modules as sysmodules
+
+import discord
 from discord.ext import commands
-from datetime import datetime, UTC
-from bot.cogs import EXTENSIONS
+
 import bot.config as Config
 import paths
+from bot.cogs import EXTENSIONS
+
 logger = logging.getLogger(__name__)
 
 BOT: '_Bot' = None
+PECK_SERVER_ICON = "https://cdn.discordapp.com/icons/917850361019125820/325129a273dac84e31f9aa5de51f1936.png?size=128"
 
 class _Bot(commands.Bot):
+	class _Tree(discord.app_commands.CommandTree):
+		async def on_error(self, interaction: discord.Interaction, error: Exception):
+			if isinstance(error, discord.app_commands.CheckFailure):
+				return
+			if isinstance(error, discord.app_commands.CommandOnCooldown):
+				await interaction.response.send_message("This command is on cooldown")
+			if not interaction.response.is_done():
+				await interaction.response.send_message("Oops! Something went wrong.", ephemeral=True)
+			raise error  # still log real bugs
 	RUNNING_SINCE: datetime = datetime.now(UTC)
 	def __init__(self, *args,**kwargs):
 		intents = discord.Intents.all()
@@ -23,47 +35,44 @@ class _Bot(commands.Bot):
 		self.intents = intents
 		del intents
 
-		super().__init__(tree_cls=_Tree, *args, **kwargs)
+		super().__init__(*args, tree_cls=_Bot._Tree, **kwargs)
 
-	def _reload_prefix(self, prefix: str):
-		to_reload = [
-			(name, module)
-			for name, module in sysmodules.items()
-			if module and name.startswith(prefix)
-		]
-		for name, module in to_reload:
-			try:
-				reload(module)
-				logger.debug(f"Reloaded module: {name}")
-			except Exception:
-				logger.exception(f"Failed to reload module: {name}")
-	async def reload_extension_with_deps(self,extension: str,*module_prefixes: str):
-		"""Reload helper modules, then reload the extension."""
-		if isinstance(module_prefixes, str):
-			raise TypeError(f"__reload_deps__ must be a tuple, not str")
-		for prefix in module_prefixes:
-			self._reload_prefix(prefix)
+	async def reload_module(self, extension: str):
+		if extension == "all":
+			for ext in EXTENSIONS:
+				await self.reload_module(ext)
+			return
+		reloaded = []
+		async def recursive_reload(mod: str):
+			if mod in reloaded:
+				return
+			module = sysmodules.get(mod)
+			deps = getattr(module, "__reload_deps__", ())
+			for dep in deps:
+				to_reload = [
+					(name, module)
+					for name, module in sysmodules.items()
+					if module and name.startswith(dep)
+				]
+				for name, module in to_reload:
+					mod_deps = getattr(module, "__reload_deps__", ())
+					if mod_deps:
+						await recursive_reload(name)
+					try:
+						reload(dep)
+						logger.debug(f"Reloaded module: {name}")
+					except Exception:
+						logger.exception(f"Failed to reload module: {name}")
+					reloaded.append(dep)
+		await recursive_reload(extension)
 		try:
 			await self.reload_extension(extension)
-		except commands.errors.ExtensionNotLoaded: pass
-
-	async def memberHasRole(self, guild_id: int, role_id:Config.GuildConfig.Roles, member_id:int):
-		config = Config.get(guild_id)
-		if config is None:
-			logger.warning(f"Server {guild_id} not configured, returning False for 'memberHasRole'")
-			return False
-		guild = self.get_guild(guild_id)
-		if not guild:
-			raise RuntimeError(f"Guild {guild} could not be retrieved")
-		member = guild.get_member(member_id)
-		if not member:
-			raise RuntimeError(f"Member {member} of guild {guild} could not be retrieved")
-		return member.get_role(config.get_role(role_id)) is not None
+		except commands.errors.ExtensionNotLoaded:
+			pass
 
 	async def setup_hook(self):
 		logger.info("Bot is getting ready...")
 		self.status = discord.Status.do_not_disturb
-		for i in self.timeouts.values(): i.run()
 		for extension in EXTENSIONS:
 			try:
 				await self.load_extension(extension)
@@ -74,23 +83,13 @@ class _Bot(commands.Bot):
 			synced = await self.tree.sync()
 			logger.info(f"Synced {len(synced)} command(s)")
 		except Exception:
-			logging.exception("An error occured while syncing")
+			logger.exception("An error occured while syncing")
 		logger.info("Startup complete")
-
-class _Tree(discord.app_commands.CommandTree):
-	async def on_error(self, interaction: discord.Interaction, error: Exception):
-		if isinstance(error, discord.app_commands.CheckFailure):
-			logger.warning(f"User {interaction.user.name} ({interaction.user.id}) tried running {interaction.command.name} without the required permissions")
-			await interaction.response.send_message("You don't have the required Permissions", ephemeral=True, delete_after=5)
-			return
-		if not interaction.response.is_done():
-			await interaction.response.send_message("Oops! Something went wrong.", ephemeral=True)
-		raise error  # still log real bugs
 
 #region Decorators
 def guild_config():
 	async def predicate(interaction: discord.Interaction) -> bool:
-		config = Config.get(interaction.guild_id)
+		config =await Config.get(interaction.guild_id)
 		if config is None:
 			return True
 		interaction.extras["config"] = config
@@ -98,7 +97,7 @@ def guild_config():
 	return discord.app_commands.check(predicate)
 def guild_only():
 	async def predicate(interaction: discord.Interaction) -> bool:
-		config = Config.get(interaction.guild_id)
+		config =await Config.get(interaction.guild_id)
 		if config is None:
 			return False
 		interaction.extras["config"] = config
@@ -119,10 +118,10 @@ def admin_only():
 def members_only():
 	async def predicate(interaction: discord.Interaction) -> bool:
 		if interaction.guild_id is None: return False
-		config = Config.get(interaction.guild_id)
+		config =await Config.get(interaction.guild_id)
 		if config is None:
 			return False
-		member_role = config.get_role(Config.GuildConfig.Roles.MEMBER)
+		member_role =config.get(Config.Roles.MEMBER)
 		if member_role is None:
 			raise RuntimeError(f"Could not find the member role of server {interaction.guild_id}")
 		return any(role.id == member_role.id for role in interaction.user.roles)

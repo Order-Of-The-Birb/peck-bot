@@ -1,34 +1,30 @@
-if __name__ == "__main__":
-	raise Exception("Start the program from the main process")
-import discord, logging
-from discord.ext import commands
-from datetime import datetime, UTC
-from dateutil.relativedelta import relativedelta
-from typing import TYPE_CHECKING
-if __name__ == "__main__":
-	from os import path
-	from sys import path as sys_path
-	sys_path.append(path.abspath(path.join(path.dirname(__file__), '..')))
-if TYPE_CHECKING:
-	from bot.client import _Bot
-# ChannelIDs, RoleIDs, CategoryIDs
-# owner_only, officer_only, members_only, debug_only
-from bot.client import RoleIDs, ChannelIDs
-#import utils.generic as genericUtil
-#import utils.time as timeUtil
-#import utils.wt as wtUtil
-import utils.management as Management
+import logging
+from datetime import UTC, datetime
 
-# "utils.generic", "utils.time", "utils.wt"
-__reload_deps__ = ()
+import discord
+from dateutil.relativedelta import relativedelta
+from discord.ext import commands
+
+import bot.client as Client
+import bot.config as Config
+
+# "utils.generic", "utils.helper",
+# "utils.memory", "utils.network", "utils.newsAPI",
+# "utils.resources", "utils.thunderapi", "utils.time"
+# "bot.modals", "bot.client", "bot.config"
+__reload_deps__ = ("bot.client", "bot.config")
 
 old_timer_interval = relativedelta(years=1)
 class RolesCog(commands.GroupCog, group_name="role"):
-	def __init__(self, bot:'_Bot'):
-		Client.BOT = bot
+	def __init__(self):
 		self.logger = logging.getLogger(__name__)
-		self.logger.setLevel(bot.logLevel)
 		self.logger.debug(f"{self.__class__.__name__} initialized")
+
+	async def interaction_check(self, interaction: discord.Interaction):
+		if isinstance(interaction.channel, discord.DMChannel):
+			await interaction.response.send_message("This command can only be run in servers.")
+			return False
+		return True
 
 	@discord.app_commands.command(name="get")
 	@discord.app_commands.guild_only()
@@ -38,33 +34,43 @@ class RolesCog(commands.GroupCog, group_name="role"):
 	])
 	async def get_role(self, interaction:discord.Interaction, role:int):
 		await interaction.response.defer(thinking=True)
+		config =await Config.get(interaction.guild_id)
+		if config is None:
+			await interaction.edit_original_response(content="This server is not yet configured")
+			return
+		if role in [2]:
+			management = config.management
+			if management is None:
+				await interaction.edit_original_response(content="This server's management token is not yet configured.")
+				return
+
 		if role == 1:
-			pingrole = interaction.guild.get_role(Client.BOT.roleIDs[RoleIDs.PING])
+			pingrole =config.get(Config.Roles.PING)
 			if pingrole in interaction.user.roles:
-				await interaction.edit_original_response(content=f"You already have the role. If you wish to remove it use the `/role remove` command!")
+				await interaction.edit_original_response(content="You already have the role. If you wish to remove it use the `/role remove` command!")
 				return
 			await interaction.user.add_roles(pingrole)
 			await interaction.edit_original_response(content=f"You have been given the {pingrole.mention} role.")
 		elif role == 2:
-			main_profile = await Management.getByDiscord(interaction.user.id)
+			main_profile = await management.get(discord_id=interaction.user.id)
 			if not main_profile:
 				await interaction.edit_original_response(content="You aren't registered in the squadron member list.")
 				return
-			main_profile = min(main_profile, key=lambda u: (u.joindate is None, u.joindate))
+			main_profile = min(main_profile, key=lambda u: (u.joined_at is None, u.joined_at))
 			x_time_ago = (datetime.now(UTC) - old_timer_interval).date()
-			old_timer = interaction.guild.get_role(Client.BOT.roleIDs[RoleIDs.OLD_TIMER])
-			if main_profile.joindate is None:
-				await interaction.edit_original_response(content=f"You seem to not have a join date saved in the database. Please contact <@{Client.BOT.yoshinoID}> about this.")
+			old_timer =config.get(Config.Roles.OLD_TIMER)
+			if main_profile.joined_at is None:
+				await interaction.edit_original_response(content="You seem to not have a join date saved in the database. Please contact an admin about this.")
 			elif interaction.user.get_role(old_timer.id) is not None:
 				await interaction.edit_original_response(content="You already seem to have the role.")
-			elif main_profile.joindate > x_time_ago:
+			elif main_profile.joined_at > x_time_ago:
 				await interaction.edit_original_response(content="You haven't been in the squadron for a year yet!")
-			elif main_profile.joindate <= x_time_ago:
+			elif main_profile.joined_at <= x_time_ago:
 				await interaction.user.add_roles(old_timer, reason="User is an old timer")
 				await interaction.edit_original_response(content="Role given.")
 				embed = discord.Embed(title="Old timer role promotion")
 				embed.add_field(name="Discord user", value=interaction.user.mention)
-				tmp = Client.BOT.get_channel(Client.BOT.channelIDs[ChannelIDs.SPAM])
+				tmp =config.get(Config.Channels.LOGS)
 				await tmp.send(embed=embed)
 
 	@discord.app_commands.command(name="remove")
@@ -74,13 +80,18 @@ class RolesCog(commands.GroupCog, group_name="role"):
 	])
 	async def rm_role(self, interaction:discord.Interaction, role:int):
 		await interaction.response.defer(thinking=True, ephemeral=True)
+		config =await Config.get(interaction.guild_id)
+		if config is None:
+			await interaction.edit_original_response(content="This server is not yet configured")
+			return
+
 		if role == 1:
-			pingrole = interaction.guild.get_role(Client.BOT.roleIDs[RoleIDs.PING])
+			pingrole =config.get(Config.Roles.PING)
 			if pingrole not in interaction.user.roles:
-				await interaction.edit_original_response(content=f"You don't have the role. If you wish to get it use the `/role get` command!")
+				await interaction.edit_original_response(content="You don't have the role. If you wish to get it use the `/role get` command!")
 				return
 			await interaction.user.remove_roles(pingrole)
 			await interaction.edit_original_response(content=f"Your {pingrole.mention} role has been removed.")
 
-async def setup(bot:'_Bot'):
-	await bot.add_cog(RolesCog(bot))
+async def setup(bot: Client._Bot):
+	await bot.add_cog(RolesCog())

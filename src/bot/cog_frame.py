@@ -1,14 +1,12 @@
-if __name__ == "__main__":
-	raise Exception("Start the program from the main process")
-import discord, logging
-from discord.ext import commands
-import bot.client as Client
-import bot.config as Config
-import paths
+import logging
 
-# "utils.generic", "utils.helper", "utils.management",
+from discord.ext import commands
+
+import bot.client as Client
+
+# "utils.generic", "utils.helper",
 # "utils.memory", "utils.network", "utils.newsAPI",
-# "utils.resources", "utils.thunderapi", "utils.time", "utils.wt"
+# "utils.resources", "utils.thunderapi", "utils.time"
 # "bot.modals", "bot.client", "bot.config"
 __reload_deps__ = ("bot.client", "bot.config")
 

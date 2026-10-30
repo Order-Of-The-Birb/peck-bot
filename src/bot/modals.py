@@ -1,31 +1,41 @@
-import asyncio, discord, re
-from discord.ui import (
-	View, LayoutView, Modal,
-	Button, Item, DynamicItem,
-	Select, RoleSelect, UserSelect, ChannelSelect, MentionableSelect,
-	TextInput, TextDisplay, Container, File, FileUpload,
-	Section, Separator, ActionRow, RadioGroup, Checkbox, CheckboxGroup, Label,
-	MediaGallery, Thumbnail
-)
-from discord import (
-    Interaction, Member, Attachment, User, Permissions,
-	CategoryChannel, TextChannel, VoiceChannel,
-	HTTPException, TextStyle, ButtonStyle, NotFound
-)
+import asyncio
+import re
 from logging import getLogger as _gL
 from typing import Protocol
-from utils import wt as wtUtil
-from utils import generic as genericUtil
-import utils.management as Management
+
+import discord
+from discord import (
+	Attachment,
+	ButtonStyle,
+	HTTPException,
+	Interaction,
+	Member,
+	NotFound,
+	Permissions,
+	TextChannel,
+	TextStyle,
+)
+from discord.ui import (
+	Button,
+	FileUpload,
+	Label,
+	Modal,
+	Select,
+	TextDisplay,
+	TextInput,
+	UserSelect,
+	View,
+)
+
 import bot.client as Client
 import bot.config as Config
+import utils.media as Media
 import utils.thunderapi as ThunderAPI
 
-__reload_deps__ = ("utils.generic", "utils.wt", "utils.management", "bot.client", "bot.config", "utils.thunderapi")
+__reload_deps__ = ("utils.media", "bot.client", "bot.config", "utils.thunderapi")
 _logger = _gL(__name__)
 
 class CreateClipCh(Modal, title="Upload Clip"):
-	VIDEO_FORMATS = [".mp4", ".mov", ".webm"]
 	userCh = Label(
 		text="User to upload for",
 		component=UserSelect(
@@ -57,8 +67,9 @@ class CreateClipCh(Modal, title="Upload Clip"):
 		super().__init__(timeout=15 * 60)
 	async def on_submit(self, interaction:Interaction):
 		await interaction.response.defer(ephemeral=True, thinking=True)
+		VIDEO_FORMATS = [".mp4", ".mov", ".webm"]
 
-		config = Config.get(interaction.guild_id)
+		config =await Config.get(interaction.guild_id)
 		if not config:
 			await interaction.edit_original_response(content="Could not get guild configs. No changes were made.")
 			return
@@ -67,16 +78,17 @@ class CreateClipCh(Modal, title="Upload Clip"):
 		clips:list[Attachment] = self.find_item(1).values
 		medal_url:str = self.find_item(2).value
 		_logger.debug(f"clips={clips}, selected_user={selected_user}, medal_url={medal_url}")
-		if not clips and not medal_url:
-			await interaction.edit_original_response(content=f"You didn't provide a clip nor a medal url.")
+		if not (clips or medal_url):
+			await interaction.edit_original_response(content="You didn't provide a clip nor a medal url.")
 			return
 		for clip in clips:
-			for ext in self.VIDEO_FORMATS:
-				if clip.filename.lower().endswith(ext): break
+			for ext in VIDEO_FORMATS:
+				if clip.filename.lower().endswith(ext):
+					break
 			else:
-				await interaction.edit_original_response(content=f"One of the attachments were not an accepted video format. The following formats are accepted: {", ".join(self.VIDEO_FORMATS)}")
+				await interaction.edit_original_response(content=f"One of the attachments were not an accepted video format. The following formats are accepted: {", ".join(VIDEO_FORMATS)}")
 				return
-		CLIPS_CATEGORY = config.get_category(Config.GuildConfig.Categories.CLIPS)
+		CLIPS_CATEGORY =config.get(Config.Categories.CLIPS)
 		if CLIPS_CATEGORY is None:
 			raise LookupError("Could not find the Clips category")
 		subjects = CLIPS_CATEGORY.text_channels
@@ -91,15 +103,15 @@ class CreateClipCh(Modal, title="Upload Clip"):
 			if len([i async for i in interaction.message.channel.history(limit=1)]) == 0:
 				await interaction.message.channel.delete("Clips channel became empty")
 			return True
-		if not any([int(i.name) == selected_user.id for i in subjects]):
+		if not any(int(i.name) == selected_user.id for i in subjects):
 			channel = await CLIPS_CATEGORY.create_text_channel(str(selected_user.id), reason="User clip channel request")
 		else:
-			channel = [i for i in subjects if int(i.name) == selected_user.id][0]
+			channel = next(i for i in subjects if int(i.name) == selected_user.id)
 		for clip in clips:
 			await channel.send(f"Sent by: {interaction.user.name} ({interaction.user.id})\nAwaiting confirmation...", view=genericButtons(acceptFunc=accept, denyFunc=deny, removeButtonsAfter=True, acceptLabel="Accept", denyLabel="Delete", timeout=None), file=await clip.to_file())
 		if medal_url:
 			try:
-				file = await genericUtil.medalDownload(medal_url)
+				file = await Media.medalDownload(medal_url)
 			except LookupError as e:
 				await interaction.edit_original_response(content=f"Something went wrong when trying to download the clip: {e}")
 				return
@@ -109,7 +121,7 @@ class CreateClipCh(Modal, title="Upload Clip"):
 				await channel.send(f"Sent by: {interaction.user.name} ({interaction.user.id})\nAwaiting confirmation...", view=genericButtons(acceptFunc=accept, denyFunc=deny, removeButtonsAfter=True, acceptLabel="Accept", denyLabel="Delete", timeout=None), file=file)
 			except HTTPException as e:
 				if e.status == 413:
-					await interaction.edit_original_response(content=f"The medal file appears to be too big")
+					await interaction.edit_original_response(content="The medal file appears to be too big")
 					return
 				raise
 		await interaction.edit_original_response(content=f"Uploaded clip for {selected_user}.")
@@ -138,23 +150,23 @@ class AddAlias(Modal, title="Add alias to user"):
 	async def on_submit(self, interaction:Interaction):
 		await interaction.response.defer(ephemeral=True, thinking=True)
 
-		config = Config.get(interaction.guild_id)
+		config =await Config.get(interaction.guild_id)
 		if not config:
 			await interaction.edit_original_response(content="Could not get guild configs. No changes were made.")
 			return
 
 		selected_user:Member = self.userCh.component.values[0]
 		alias:str = self.userAlias.component.value
-		CLIPS_CATEGORY = config.get_category(Config.GuildConfig.Categories.CLIPS)
+		CLIPS_CATEGORY =config.get(Config.Categories.CLIPS)
 		if CLIPS_CATEGORY is None:
 			raise LookupError("Could not find the Clips category")
 		subjects = CLIPS_CATEGORY.text_channels
 		_logger.debug(f"Subjects: {subjects}")
 		_logger.debug(f"Category: {CLIPS_CATEGORY}")
-		if not any([int(i.name) == selected_user.id for i in subjects]):
+		if not any(int(i.name) == selected_user.id for i in subjects):
 			await interaction.edit_original_response(content="The selected user does not have a clip channel. Use the command `/upload_clip` to create one")
 			return
-		channel:TextChannel = [i for i in subjects if int(i.name) == selected_user.id][0]
+		channel:TextChannel = next(i for i in subjects if int(i.name) == selected_user.id)
 		async def accept(interaction:Interaction):
 			alias:str = interaction.message.content.split("\n")[1].strip('"').lower()
 			await interaction.message.delete()
@@ -222,17 +234,23 @@ class ReportModal(Modal, title="Report user"):
 	def __init__(self):
 		super().__init__(timeout=15 * 60)
 	async def on_submit(self, interaction: discord.Interaction):
+		#raise NotImplementedError("Currently rebuilding this code")
 		await interaction.response.defer(thinking=True, ephemeral=True)
 
-		config = Config.get(interaction.guild_id)
+		config =await Config.get(interaction.guild_id)
 		if not config:
 			await interaction.edit_original_response(content="Could not get guild configs. No changes were made.")
+			return
+		management = config.management
+		if management is None:
+			await interaction.edit_original_response(content="This server's management token is not yet configured.")
 			return
 
 		url:str = self.replayURL.component.value.strip().rstrip("/")
 		report_category:Select = self.find_item(69)
 
-		member = await Management.get(username=username)
+		username:str = self.user.component.value.strip()
+		member = await management.get(username=username)
 		if member is None:
 			await interaction.edit_original_response(content="No such user exists in our database")
 			return
@@ -244,16 +262,16 @@ class ReportModal(Modal, title="Report user"):
 		if not REPLAY_URL_REGEX:
 			await interaction.edit_original_response(content="**Invalid replay URL format.** Please use a valid War Thunder replay link: `https://warthunder.com/en/tournament/replay/<id>`")
 			return
-		replay = ThunderAPI.replay(REPLAY_URL_REGEX.group(1))
-		username:str = self.user.component.value.strip()
-		report_msg:str = self.message.component.value.strip()
-		if (_ := await Management.get(username=username)) is None or not any(i.status == Management.Entry.Status.MEMBER for i in _):
-
-
-		if not isInReplay:
+		replay = await ThunderAPI.replay(REPLAY_URL_REGEX.group(1))
+		for player in replay.team1:
+			if int(player) == member.gaijin_id:
+				break
+		else:
 			await interaction.edit_original_response(content=f"The match you provided a link to does not have the user '{username}' in it.")
 			return
-		embed = discord.Embed(title=f"Report")
+
+		report_msg:str = self.message.component.value.strip()
+		embed = discord.Embed(title="Report")
 		embed.set_author(name=f"{interaction.user.name} (ID: {interaction.user.id})", icon_url=interaction.user.display_avatar.url)
 		embed.add_field(name="WT username", value=username, inline=False)
 		if report_msg:
@@ -261,7 +279,7 @@ class ReportModal(Modal, title="Report user"):
 		embed.add_field(name="Category", value=report_category.values[0])
 		embed.add_field(name="Evidence URL", value=url, inline=False)
 		_logger.debug(f"Report from {interaction.user.name} ({interaction.user.id})\nWT username: {username}\nReport message: {report_msg}")
-		await Client.BOT.get_channel(Client.BOT.channelIDs[ChannelIDs.SPAM]).send(embed=embed)
+		await config.get(Config.Channels.LOGS).send(embed=embed)
 		await interaction.edit_original_response(content="Report submitted!")
 	async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
 		await interaction.edit_original_response(content='Oops! Something went wrong.')
@@ -327,32 +345,3 @@ class genericButtons(View):
 		self.add_item(yes)
 		if deny and denyFunc is not None:
 			self.add_item(no)
-
-class dataCheckView(discord.ui.LayoutView):
-
-	def __init__(self, ):
-		self.bracket = wtUtil.get_sqb_br(datetime.combine(_date, _time, UTC))
-		self._1 = discord.ui.TextDisplay("The following data have been given, and the event will be created according to them. Are these correct?")
-		self._2 = discord.ui.Section(
-			discord.ui.TextDisplay(f"Start time: <t:{round(planned_start.timestamp())}:s>"),
-			discord.ui.TextDisplay(f"End time: <t:{round(planned_end.timestamp())}:s>"),
-			discord.ui.TextDisplay(f"Current BR: {bracket.br if bracket else "Could not retrieve BR data for the given date"}"),
-			accessory=discord.ui.Button(
-				style=discord.ButtonStyle.green,
-				label="Yes"
-			)
-		)
-
-		self._2.accessory.callback = self.acceptButton
-		super().__init__(timeout=180)
-	async def acceptButton(self, interaction:discord.Interaction):
-		event = await guild.create_scheduled_event(
-			name="[SQB] Scheduled session",
-			description=f"Current BR: {self.bracket.br if self.bracket else 'Could not retrieve BR data for the given date'}\nCreated by: {interaction.user.name} ({interaction.user.id})",
-			channel=guild.get_channel(Client.BOT.channelIDs[ChannelIDs.SQB]),
-			entity_type=discord.EntityType.voice,
-			privacy_level=discord.PrivacyLevel.guild_only,
-			start_time=planned_start,
-			end_time=planned_end
-		)
-		await interaction.response.send_message(f"The event can be found at the following place: {event.url}", ephemeral=True)

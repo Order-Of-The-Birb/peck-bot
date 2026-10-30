@@ -7,5 +7,6 @@ python-dateutil
 playwright
 fastapi
 uvicorn
-requests
 matplotlib
+pydantic
+cryptography

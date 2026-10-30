@@ -1,22 +1,22 @@
-if __name__ == "__main__":
-	raise Exception("Start the program from the main process")
-import discord, logging, asyncio
+import asyncio
+import logging
+from datetime import UTC, datetime, timedelta
 from re import sub as re_sub
-from discord.ext import commands
-from datetime import datetime, timedelta, UTC
 
-import utils.generic as genericUtil
-import utils.time as timeUtil
-import utils.management as management
+import discord
+from discord.ext import commands
+
 import bot.client as Client
 import bot.config as Config
+import utils.generic as genericUtil
 import utils.newsAPI as NewsAPI
+import utils.time as timeUtil
 
-# "utils.generic", "utils.helper", "utils.management",
+# "utils.generic", "utils.helper",
 # "utils.memory", "utils.network", "utils.newsAPI",
-# "utils.resources", "utils.thunderapi", "utils.time", "utils.wt"
+# "utils.resources", "utils.thunderapi", "utils.time"
 # "bot.modals", "bot.client", "bot.config"
-__reload_deps__ = ("bot.client", "bot.config", "utils.generic", "utils.time", "utils.management", "utils.newsAPI")
+__reload_deps__ = ("bot.client", "bot.config", "utils.generic", "utils.time",  "utils.newsAPI")
 
 sqb_member_last_seen = datetime.now(UTC)-timedelta(minutes=30)
 
@@ -28,6 +28,7 @@ class Listeners(commands.Cog):
 
 		self.last_disconnect = None
 		self.clip_timeouts = timeUtil.GenericTimeout()
+		self.clip_timeouts.run()
 		self.logger.debug(f"{self.__class__.__name__} initialized")
 	# region DEFAULT LISTENERS
 	# region Bot
@@ -52,13 +53,13 @@ class Listeners(commands.Cog):
 
 	@commands.Cog.listener()
 	async def on_error(self, event:str, *args, **kwargs):
-		self.logger.error(f"An error occurred in '{event}'", exc_info=True)
+		self.logger.exception(f"An error occurred in '{event}'")
 		# If the event had a message, reply there
 		if args and hasattr(args[0], "channel"):
 			try:
 				await args[0].channel.send("An unexpected error occurred.")
 			except Exception:
-				pass
+				self.logger.exception("Could not send exception message")
 
 	@commands.Cog.listener()
 	async def on_ready(self):
@@ -71,13 +72,13 @@ class Listeners(commands.Cog):
 	# region Member
 	@commands.Cog.listener()
 	async def on_member_remove(self, member:discord.Member):
-		user = await management.get(discord_id=member.id)
-		if user:
-			config = Config.get(member.guild.id)
-			if config is None:
-				return
+		config = await Config.get(member.guild.id)
+		if config is None:
+			return
 
-			logs_channel: discord.TextChannel = config.get_channel(Config.GuildConfig.Channels.LOGS)
+		user = await config.management.get(discord_id=member.id)
+		if user:
+			logs_channel = config.get(Config.Channels.LOGS)
 			if logs_channel is None:
 				return
 
@@ -93,21 +94,22 @@ class Listeners(commands.Cog):
 	trevortimes:int = 0
 	@commands.Cog.listener()
 	async def on_message(self, message:discord.Message):
-		config = Config.get(message.guild.id)
+		config = await Config.get(message.guild.id)
 		if config is None:
 			return
 
-		if message.author.bot: return
+		if message.author.bot:
+			return
 		if isinstance(message.channel, discord.DMChannel):
-			embed = discord.Embed(title=f"DM sent to PECK bot")
+			embed = discord.Embed(title="DM sent to PECK bot")
 			embed.add_field(name="", value=message.content, inline=True)
 			embed.set_footer(text=f"{message.author.name} ({message.author.id})")
-			await config.get_channel(Config.GuildConfig.Channels.LOGS).send(embed=embed)
-		elif message.channel == config.get_channel(Config.GuildConfig.Channels.WTNEWS):
+			config.get(Config.Channels.LOGS).send(embed=embed)
+		elif message.channel ==config.get(Config.Channels.WTNEWS):
 			if "warthunder.com" not in message.content.lower():
 				await message.delete()
 		elif "clip" in message.content.lower():
-			CLIPS_CATEGORY = config.get_category(Config.GuildConfig.Categories.CLIPS)
+			CLIPS_CATEGORY =config.get(Config.Categories.CLIPS)
 			subjects = CLIPS_CATEGORY.text_channels
 			subject = next((
 				s for s in subjects
@@ -174,12 +176,12 @@ class Listeners(commands.Cog):
 	# region Scheduled Event
 	@commands.Cog.listener()
 	async def on_scheduled_event_create(self, event:discord.ScheduledEvent):
-		config = Config.get(event.guild_id)
+		config = await Config.get(event.guild_id)
 		if config is None:
 			return
 
 		if event.name.startswith("["):
-			announcementsCh = config.get_channel(Config.GuildConfig.Channels.ANNOUNCEMENTS)
+			announcementsCh =config.get(Config.Channels.ANNOUNCEMENTS)
 			if event.name.lower().startswith("[event]"):
 				await announcementsCh.send(f"A new event is starting soon:tm:!\n{event.url}")
 			if event.name.lower().startswith("[sqb]"):
@@ -188,29 +190,33 @@ class Listeners(commands.Cog):
 	# endregion
 	# region CUSTOM LISTENERS
 	@commands.Cog.listener()
-	async def on_newsapi_post(self, data:'NewsAPI.News'):
+	async def on_newsapi_post(self, data:NewsAPI.News):
 		self.logger.debug("Dispatch for NewsAPI post received")
 		_ = re_sub(r"\[[a-zA-Z0-9]+\]", "", data.title).strip()
 		title_truncated = _ if len(_) <= 100 else _[:97] + "..."
 		del _
+
 		embed = data.buildEmbed()
 
-		for guild in Config.guilds():
-			news_ch = guild.get_channel(Config.GuildConfig.Channels.WTNEWS)
+		async for guild in Config.guilds():
+			news_ch = guild.get(Config.Channels.WTNEWS)
 
 			match data.importance:
 				case NewsAPI.News.ImportanceLevel.EVENT:
-					content = guild.get_role(Config.GuildConfig.Roles.EVENT_NEWS).mention
+					content = guild.get(Config.Roles.EVENT_NEWS).mention
 				case NewsAPI.News.ImportanceLevel.MAJOR:
-					content = guild.get_role(Config.GuildConfig.Roles.MAJOR_NEWS).mention
+					content = guild.get(Config.Roles.MAJOR_NEWS).mention
 				case _:
 					content = ""
 
-			msg = await news_ch.send(content=content, embed=embed)
-			await msg.create_thread(
+			applied_tags = [tag for tag in news_ch.available_tags if tag in data.tags]
+
+			await news_ch.create_thread(
 				name=title_truncated,
-				auto_archive_duration=1440,
-				reason="Autogenerated thread under news post"
+				reason="Autogenerated thread under news post",
+				content=content,
+				embed=embed,
+				applied_tags=applied_tags
 			)
 			await asyncio.sleep(0.1)
 		self.logger.debug("Dispatch for NewsAPI Post complete")

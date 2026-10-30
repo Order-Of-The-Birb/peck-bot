@@ -1,24 +1,24 @@
-if __name__ == "__main__":
-	raise Exception("Start the program from the main process")
-import discord, logging
+import logging
 from asyncio import sleep as aSleep
-from discord.ext import commands
-from datetime import datetime, UTC
 from calendar import monthrange
+from datetime import UTC, datetime
 from enum import IntEnum, StrEnum
-from typing import Optional, Literal
+from typing import Literal
+
+import discord
+from discord.ext import commands
+
 # ChannelIDs, RoleIDs, CategoryIDs
 # owner_only, officer_only, members_only, debug_only
 #from utils.bot import
 #import utils.generic as genericUtil
 #import utils.time as timeUtil
-#import utils.wt as wtUtil
 import bot.client as Client
 import bot.config as Config
 
-# "utils.generic", "utils.helper", "utils.management",
+# "utils.generic", "utils.helper",
 # "utils.memory", "utils.network", "utils.newsAPI",
-# "utils.resources", "utils.thunderapi", "utils.time", "utils.wt"
+# "utils.resources", "utils.thunderapi", "utils.time"
 # "bot.modals", "bot.client", "bot.config"
 __reload_deps__ = ("bot.client", "bot.config")
 
@@ -162,21 +162,26 @@ class auditLogCog(commands.Cog):
 		guild: int,
 		/,
 		*,
-		description:str = None,
+		description:str | None = None,
 		author:discord.User|discord.Member|discord.Guild=None,
-		title:str = None,
-		url:str=None,
-		color:int=None,
-		footer_text:str=None,
-		footer_icon_url:str=None,
-		items:list[dict[Literal["name", "value"], str]|None] = [],
-		timestamp:datetime=None,
-		author_name_override:str = None,
+		title:str  | None = None,
+		url:str | None = None,
+		color:int | None = None,
+		footer_text:str | None = None,
+		footer_icon_url:str | None = None,
+		items:list[dict[Literal["name", "value"], str]] | None = None,
+		timestamp:datetime | None =None,
+		author_name_override:str | None = None,
 		author_avatar_thumbnail:bool = False
 	) -> None:
-		config = Config.get(guild)
+		config =await Config.get(guild)
 		if config is None:
 			return
+		channel =config.get(Config.Channels.AUDIT_LOG)
+		if channel is None:
+			return
+		if items is None:
+			items = []
 
 		embed = discord.Embed(
 			title=title,
@@ -235,8 +240,7 @@ class auditLogCog(commands.Cog):
 			icon_url=footer_icon_url
 		)
 
-		channelID = config.get_channel[Config.GuildConfig.Channels.AUDIT_LOG]
-		await (Client.BOT.get_channel(channelID)).send(embed=embed)
+		await channel.send(embed=embed)
 
 	@staticmethod
 	async def getAuditLogEntry(
@@ -249,7 +253,7 @@ class auditLogCog(commands.Cog):
 		key: AuditLogDiffTypes | None = None,
 		lookupAfter: bool = True,
 		limit: int = 10
-	) -> Optional[discord.AuditLogEntry]:
+	) -> discord.AuditLogEntry | None:
 		await aSleep(0.2) # to let audit log populate
 		_missing = object()
 		async for entry in guild.audit_logs(limit=limit, action=action):

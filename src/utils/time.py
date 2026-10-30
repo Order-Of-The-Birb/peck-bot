@@ -1,7 +1,9 @@
-from datetime import datetime, timedelta, UTC, time
-from dateutil.parser import isoparse
+from datetime import UTC, datetime, time, timedelta
 from enum import StrEnum
+
+from dateutil.parser import isoparse
 from discord.ext import tasks
+
 import bot.client
 
 sqb_brackets = (
@@ -40,28 +42,6 @@ def discord_timestamp(timestamp:int|datetime, type:timestampTypes) -> str:
 	if isinstance(timestamp, datetime):
 		return f"<t:{toUnix(timestamp)}:{type}>"
 	return f"<t:{timestamp}:{type}>"
-def get_sqb_timebracket(include_current:bool=True) -> tuple[datetime, datetime]:
-	rn = datetime.now(UTC)
-	global sqb_brackets
-	today_brackets = [
-		(
-			datetime.combine(rn.date(), start, tzinfo=UTC),
-		 	datetime.combine(rn.date(), end, tzinfo=UTC)
-		)
-		for start, end in sqb_brackets
-	]
-	if include_current:
-		for start, end in today_brackets: # Currently IN the bracket
-			if start <= rn < end:
-				return start, end
-	future_brackets = [(start, end) for start, end in today_brackets if start > rn] # Find next bracket
-	if future_brackets:
-		return min(future_brackets, key=lambda r: r[0])
-	return today_brackets[0][0]+timedelta(days=1), today_brackets[0][1]+timedelta(days=1)
-def isInTimebracket(bracket:tuple[datetime]|None=None) -> bool:
-	if bracket is None:
-		bracket = get_sqb_timebracket()
-	return bracket[0] <= datetime.now(UTC) < bracket[1]
 
 class GenericTimeout:
 	cleanupTask:tasks.Loop

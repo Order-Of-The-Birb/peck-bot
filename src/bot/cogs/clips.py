@@ -1,18 +1,19 @@
-if __name__ == "__main__":
-	raise Exception("Start the program from the main process")
-import discord, logging
+import logging
+
+import discord
 from discord.ext import commands
-# owner_only, officer_only, members_only, debug_only
-from bot.client import admin_only
-from bot.modals import CreateClipCh, AddAlias
+
 #import utils.time as timeUtil
-#import utils.wt as wtUtil
 import bot.client as Client
 import bot.config as Config
 
-# "utils.generic", "utils.helper", "utils.management",
+# owner_only, officer_only, members_only, debug_only
+from bot.client import admin_only
+from bot.modals import AddAlias, CreateClipCh
+
+# "utils.generic", "utils.helper",
 # "utils.memory", "utils.network", "utils.newsAPI",
-# "utils.resources", "utils.thunderapi", "utils.time", "utils.wt"
+# "utils.resources", "utils.thunderapi", "utils.time"
 # "bot.modals", "bot.client", "bot.config"
 __reload_deps__ = ("bot.client", "bot.config", "bot.modals")
 
@@ -23,12 +24,12 @@ class ClipsCog(commands.GroupCog, group_name="clips"):
 
 	@discord.app_commands.command(name="upload")
 	async def upload_clip(self, interaction:discord.Interaction):
-		await interaction.response.send_modal(CreateClipCh(Client.BOT))
+		await interaction.response.send_modal(CreateClipCh())
 
 	@discord.app_commands.command(name="add_alias")
 	@admin_only()
 	async def add_alias(self, interaction:discord.Interaction):
-		await interaction.response.send_modal(AddAlias(Client.BOT))
+		await interaction.response.send_modal(AddAlias())
 
 	@discord.app_commands.command(name="remove_alias")
 	@discord.app_commands.default_permissions(manage_channels=True)
@@ -36,17 +37,18 @@ class ClipsCog(commands.GroupCog, group_name="clips"):
 	async def remove_alias(self, interaction:discord.Interaction, alias:str, user:discord.User):
 		await interaction.response.defer(thinking=True, ephemeral=True)
 
-		config = Config.get(interaction.guild.id)
+		config =await Config.get(interaction.guild.id)
 		if config is None:
-			await interaction.edit_original_response(content=f"An error occurred while loading server data")
+			await interaction.edit_original_response(content="An error occurred while loading server data")
 			return
-		category = config.get_category(Config.GuildConfig.Categories.CLIPS)
-
+		category =config.get(Config.Categories.CLIPS)
 		if category is None:
 			raise LookupError(f"Could not find clips category in guild {interaction.guild_id}")
+
 		userClipCh = None
 		for ch in category.channels:
-			if ch.name != str(user.id): continue
+			if ch.name != str(user.id):
+				continue
 			userClipCh = ch
 			break
 		else:
@@ -54,7 +56,8 @@ class ClipsCog(commands.GroupCog, group_name="clips"):
 			return
 		aliases = userClipCh.topic.split("\n")
 		for ind, _alias in enumerate(aliases):
-			if _alias.lower() != alias.lower(): continue
+			if _alias.lower() != alias.lower():
+				continue
 			aliases.pop(ind)
 			userClipCh.topic = "\n".join(aliases)
 			await interaction.edit_original_response(content=f"Alias '{alias}' has been removed from user {user.name}")

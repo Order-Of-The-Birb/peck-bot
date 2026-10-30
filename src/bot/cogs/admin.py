@@ -1,13 +1,13 @@
-if __name__ == "__main__":
-	raise Exception("Start the program from the main process")
-import discord, logging
+import logging
+
+import discord
 from discord.ext import commands
-import bot.config as Config
+
 import bot.client as Client
 
-# "utils.generic", "utils.helper", "utils.management",
+# "utils.generic", "utils.helper",
 # "utils.memory", "utils.network", "utils.newsAPI",
-# "utils.resources", "utils.thunderapi", "utils.time", "utils.wt"
+# "utils.resources", "utils.thunderapi", "utils.time"
 # "bot.modals", "bot.client", "bot.config"
 __reload_deps__ = ("bot.client", "bot.config")
 
@@ -54,7 +54,7 @@ class AdminCog(commands.Cog):
 	@discord.app_commands.guild_only()
 	@discord.app_commands.default_permissions(administrator=True)
 	@discord.app_commands.checks.has_permissions(administrator=True)
-	async def say(self, interaction:discord.Interaction, content:str, file:discord.Attachment = None, respond_to_id:str = None):
+	async def say(self, interaction:discord.Interaction, content:str, file:discord.Attachment | None = None, respond_to_id:str | None = None):
 		"""Says the content as the bot, Only usable as the owner of the bot"""
 		await interaction.response.defer(ephemeral=True)
 		if "-" in respond_to_id: # copy message ID returns <channelID>-<messageID> when holding shift

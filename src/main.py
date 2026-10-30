@@ -1,14 +1,18 @@
 #General imports
-import asyncio, logging
+import asyncio
+import logging
+import sys
 from logging.handlers import TimedRotatingFileHandler
 from os import getenv, path
+
+from cryptography.fernet import Fernet
+
 # Custom packages
 import bot.client as Client
-from bot.cogs import EXTENSIONS
-from utils import management
-from utils import newsAPI
-from utils import network
 import paths
+from bot.cogs import EXTENSIONS
+from utils import network, newsAPI
+
 
 def log_namer(default_name:str):
 	dirname = path.dirname(default_name)
@@ -27,9 +31,15 @@ logging.getLogger("discord").setLevel(logging.WARNING)
 
 __TOKEN = getenv("bot_token")
 if __TOKEN is None:
-	raise EnvironmentError("Bot Token could not be retrieved. Exiting...")
+	raise OSError("Bot Token could not be retrieved. Exiting...")
 
 def main():
+	if not paths.KEY.exists():
+		logger.info("No database key found, generating.")
+		key = Fernet.generate_key()
+		paths.KEY.write_bytes(key)
+	paths.FERNET = Fernet(paths.KEY.read_bytes())
+
 	# region Client setup
 	loop = asyncio.new_event_loop()
 	asyncio.set_event_loop(loop)
@@ -37,7 +47,6 @@ def main():
 	try:
 		loop.run_until_complete(
 			asyncio.gather(
-				management.upd_squadron_id(),
 				network.start(),
 				Client.setup(__TOKEN)
 			)
@@ -47,10 +56,11 @@ def main():
 		loop.run_until_complete(network.close())
 		if newsAPI._runtime is not None:
 			newsAPI._runtime.cancel()
+		sys.exit(0)
 	except Exception:
 		logger.exception("An exception occurred that caused the program to stall")
+		sys.exit(1)
 	finally:
 		loop.close()
-		exit(0)
 if __name__ == "__main__" or __package__ is None:
 	main()

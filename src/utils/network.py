@@ -1,8 +1,10 @@
+from asyncio import Event, Lock
+
 from aiohttp import ClientSession
 from aiohttp.cookiejar import DummyCookieJar
-from fastapi.concurrency import asynccontextmanager 
 from fastapi import HTTPException
-from asyncio import Lock, Event
+from fastapi.concurrency import asynccontextmanager
+
 
 class NetworkError(HTTPException): pass
 
@@ -23,10 +25,9 @@ async def get(url:str, **kwargs):
 		yield resp
 @asynccontextmanager
 async def request(method:str, url:str, **kwargs):
-	async with operation() as session:
-		async with session.request(method, url, **kwargs) as resp:
-			resp.raise_for_status()
-			yield resp
+	async with operation() as session, session.request(method, url, **kwargs) as resp:
+		resp.raise_for_status()
+		yield resp
 
 @asynccontextmanager
 async def operation():
@@ -43,7 +44,7 @@ async def start():
 		if _session is not None and not _session.closed:
 			return
 		_closing = False
-		_session = ClientSession(headers={"User-Agent": "ThunderAPI/1.0"}, cookie_jar=DummyCookieJar())
+		_session = ClientSession(headers={"User-Agent": "PECK-bot/1.0"}, cookie_jar=DummyCookieJar())
 
 async def close():
 	"""Prepares the NetworkManager library for shutdown"""
