@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Coroutine
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any, Literal, NoReturn
 
 from discord import Embed
@@ -16,6 +16,7 @@ from asyncio import Task
 import bot.client as Client
 from utils.models.thunderapi.generic import NewsModel
 from utils.thunderapi import news_ws
+
 
 class News:
 	id:int
