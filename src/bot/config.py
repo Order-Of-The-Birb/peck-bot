@@ -207,7 +207,7 @@ class GuildConfig:
 			__CHANNELS=config.get("channels", {}),
 			__ROLES=config.get("roles", {}),
 			__CATEGORIES=config.get("categories", {}),
-			__MANAGEMENT=await cls._Management.login(config.get("management_token"))
+			__MANAGEMENT=await cls._Management.login(config.get("squadron"))
 		)
 
 	@overload
