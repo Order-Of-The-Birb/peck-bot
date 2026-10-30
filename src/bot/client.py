@@ -12,7 +12,7 @@ from bot.cogs import EXTENSIONS
 
 logger = logging.getLogger(__name__)
 
-BOT: '_Bot' = None
+BOT: '_Bot' = globals().get("BOT")
 PECK_SERVER_ICON = "https://cdn.discordapp.com/icons/917850361019125820/325129a273dac84e31f9aa5de51f1936.png?size=128"
 
 class _Bot(commands.Bot):
@@ -32,39 +32,34 @@ class _Bot(commands.Bot):
 		# message caches for role lookups and edit/delete audit logs.
 		intents.presences = False
 		intents.typing = False
-		self.intents = intents
-		del intents
 
-		super().__init__(*args, tree_cls=_Bot._Tree, **kwargs)
+		super().__init__(*args, tree_cls=_Bot._Tree, intents=intents, **kwargs)
 
 	async def reload_module(self, extension: str):
 		if extension == "all":
 			for ext in EXTENSIONS:
 				await self.reload_module(ext)
 			return
-		reloaded = []
-		async def recursive_reload(mod: str):
-			if mod in reloaded:
-				return
+
+		reloaded: set[str] = set()
+
+		async def reload_deps(mod: str):
 			module = sysmodules.get(mod)
-			deps = getattr(module, "__reload_deps__", ())
-			for dep in deps:
-				to_reload = [
-					(name, module)
-					for name, module in sysmodules.items()
-					if module and name.startswith(dep)
-				]
-				for name, module in to_reload:
-					mod_deps = getattr(module, "__reload_deps__", ())
-					if mod_deps:
-						await recursive_reload(name)
+			if module is None:
+				return
+			for dep in getattr(module, "__reload_deps__", ()):
+				for name, submodule in tuple(sysmodules.items()):
+					if submodule is None or not name.startswith(dep) or name in reloaded:
+						continue
+					reloaded.add(name)
+					await reload_deps(name)
 					try:
-						reload(dep)
+						reload(submodule)
 						logger.debug(f"Reloaded module: {name}")
 					except Exception:
 						logger.exception(f"Failed to reload module: {name}")
-					reloaded.append(dep)
-		await recursive_reload(extension)
+
+		await reload_deps(extension)
 		try:
 			await self.reload_extension(extension)
 		except commands.errors.ExtensionNotLoaded:

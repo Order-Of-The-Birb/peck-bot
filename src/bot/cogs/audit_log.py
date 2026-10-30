@@ -606,5 +606,5 @@ class auditLogCog(commands.Cog):
 				]
 			)
 	# endregion
-async def setup():
-	await Client.BOT.add_cog(auditLogCog())
+async def setup(bot: Client._Bot):
+	await bot.add_cog(auditLogCog())

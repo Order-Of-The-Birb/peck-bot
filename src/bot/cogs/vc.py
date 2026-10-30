@@ -15,7 +15,7 @@ __reload_deps__ = ()
 
 class SquadVC:
 	def __init__(self):
-		self.channels:dict[int, datetime|None] = []
+		self.channels:dict[int, datetime|None] = {}
 		self.checkDelay:int = 0
 
 	async def add(self, channel:discord.VoiceChannel):
@@ -105,7 +105,7 @@ class VcCog(commands.GroupCog, group_name="squad"):
 			category=category
 		)
 		self.voice_channels.setdefault(interaction.guild_id, SquadVC())
-		self.voice_channels[interaction.guild_id].add(new_ch)
+		await self.voice_channels[interaction.guild_id].add(new_ch)
 		await interaction.edit_original_response(content=f"Channel created, {new_ch.mention}")
 
 	#region Tasks
@@ -123,7 +123,7 @@ class VcCog(commands.GroupCog, group_name="squad"):
 				for channel in categ.voice_channels:
 					if not channel.name.lower().startswith("squad "):
 						continue
-					self.voice_channels[dc_guild.id].add(channel)
+					await self.voice_channels[dc_guild.id].add(channel)
 				continue
 			await self.voice_channels[dc_guild.id].update()
 

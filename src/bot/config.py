@@ -2,7 +2,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from enum import Enum, StrEnum
-from json import load as load_json
+from json import loads as load_json
 from os import getenv
 from random import choice
 from typing import Literal, overload
@@ -36,7 +36,7 @@ class Roles(StrEnum):
 class Categories(StrEnum):
 	CLIPS = "CLIPS"
 	SQUAD_VC = "SQUAD_VC"
-@dataclass(slots=True)
+
 class GuildConfig:
 	class _Management:
 		squadron_id: int
@@ -46,9 +46,8 @@ class GuildConfig:
 			if squadron_id is None:
 				return None
 
-			self = cls(
-				squadron_id=squadron_id
-			)
+			self = cls()
+			self.squadron_id=squadron_id
 			return self
 
 		@dataclass(slots=True, frozen=True)
@@ -188,6 +187,21 @@ class GuildConfig:
 	__SQUADRON_ID: int | None
 	__MANAGEMENT: _Management | None
 
+	def __init__(self,
+		id: int,
+		channels: dict[Channels, int],
+		roles: dict[Roles, int|list[int]],
+		categories: dict[Categories, int],
+		squadron_id: int | None,
+		management: _Management | None
+	):
+		self.__ID = id
+		self.__CHANNELS = channels
+		self.__ROLES = roles
+		self.__CATEGORIES = categories
+		self.__SQUADRON_ID = squadron_id
+		self.__MANAGEMENT = management
+
 	@classmethod
 	async def from_id(cls, guild_id: int | None) -> "GuildConfig | None":
 		if guild_id is None:
@@ -203,11 +217,12 @@ class GuildConfig:
 		config:dict[str, dict] = load_json(path.read_text())
 
 		return cls(
-			__ID=guild_id,
-			__CHANNELS=config.get("channels", {}),
-			__ROLES=config.get("roles", {}),
-			__CATEGORIES=config.get("categories", {}),
-			__MANAGEMENT=await cls._Management.login(config.get("squadron"))
+			id=guild_id,
+			channels=config.get("channels", {}),
+			roles=config.get("roles", {}),
+			categories=config.get("categories", {}),
+			squadron_id=config.get("squadron"),
+			management=await cls._Management.login(config.get("squadron"))
 		)
 
 	@overload
@@ -251,6 +266,22 @@ class GuildConfig:
 	def management(self) -> _Management:
 		return self.__MANAGEMENT
 
+	async def create_missing_tags_wtnews(self):
+		ch = self.get(Channels.WTNEWS)
+		available_tags = []
+		required = ["Event", "Development", "Video", "Shop", "Fixed", "eSport", "Market", "Special", "Warbonds", "Fair Play", "Update"]
+		for tag in ch.available_tags:
+			if tag in required:
+				available_tags.append(tag.name)
+
+		for tag in required:
+			if tag not in available_tags:
+				ch.create_tag(
+					name=tag,
+					moderated=True,
+					reason="Missing News channel tag"
+				)
+
 	async def random_propaganda(self):
 		channel = self.get(Channels.PROPAGANDA)
 
@@ -286,7 +317,7 @@ async def get(guild_id: int | discord.Interaction) -> GuildConfig | None:
 
 async def guilds() -> AsyncIterator[GuildConfig]:
 	for path in GUILDS.iterdir():
-		if path.name == "example.json":
+		if path.name in ["example.json",".gitignore"]:
 			continue
 		config = await GuildConfig.from_id(int(path.name.removesuffix(".json")))
 		if config is None:

@@ -43,5 +43,5 @@ class ContextMenuCog(commands.Cog):
 		for item in self.menuItems:
 			Client.BOT.tree.remove_command(item.name, type=item.type)
 
-async def setup():
-	await Client.BOT.add_cog(ContextMenuCog())
+async def setup(bot: Client._Bot):
+	 await bot.add_cog(ContextMenuCog())

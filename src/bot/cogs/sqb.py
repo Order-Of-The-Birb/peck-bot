@@ -172,5 +172,5 @@ class SQBCog(commands.GroupCog, group_name="sqb"):
 		return await super().cog_unload()
 	#endregion
 
-async def setup():
-	await Client.BOT.add_cog(SQBCog())
+async def setup(bot: Client._Bot):
+	 await bot.add_cog(SQBCog())

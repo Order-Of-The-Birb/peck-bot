@@ -94,18 +94,14 @@ class Listeners(commands.Cog):
 	trevortimes:int = 0
 	@commands.Cog.listener()
 	async def on_message(self, message:discord.Message):
-		config = await Config.get(message.guild.id)
-		if config is None:
-			return
 
 		if message.author.bot:
 			return
-		if isinstance(message.channel, discord.DMChannel):
-			embed = discord.Embed(title="DM sent to PECK bot")
-			embed.add_field(name="", value=message.content, inline=True)
-			embed.set_footer(text=f"{message.author.name} ({message.author.id})")
-			config.get(Config.Channels.LOGS).send(embed=embed)
-		elif message.channel ==config.get(Config.Channels.WTNEWS):
+
+		config = await Config.get(message.guild.id)
+		if config is None:
+			return
+		if message.channel ==config.get(Config.Channels.WTNEWS):
 			if "warthunder.com" not in message.content.lower():
 				await message.delete()
 		elif "clip" in message.content.lower():
@@ -202,14 +198,16 @@ class Listeners(commands.Cog):
 			news_ch = guild.get(Config.Channels.WTNEWS)
 
 			match data.importance:
-				case NewsAPI.News.ImportanceLevel.EVENT:
+				case NewsAPI.NewsModel.ImportanceLevel.EVENT:
 					content = guild.get(Config.Roles.EVENT_NEWS).mention
-				case NewsAPI.News.ImportanceLevel.MAJOR:
+				case NewsAPI.NewsModel.ImportanceLevel.MAJOR:
 					content = guild.get(Config.Roles.MAJOR_NEWS).mention
 				case _:
 					content = ""
 
-			applied_tags = [tag for tag in news_ch.available_tags if tag in data.tags]
+			await guild.create_missing_tags_wtnews()
+
+			applied_tags = [tag for tag in news_ch.available_tags if tag.name in data.tags]
 
 			await news_ch.create_thread(
 				name=title_truncated,
@@ -222,5 +220,5 @@ class Listeners(commands.Cog):
 		self.logger.debug("Dispatch for NewsAPI Post complete")
 	# endregion
 
-async def setup():
-	await Client.BOT.add_cog(Listeners())
+async def setup(bot: Client._Bot):
+	 await bot.add_cog(Listeners())

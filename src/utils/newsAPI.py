@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Coroutine
 from datetime import UTC, datetime
-from enum import Enum
 from typing import Any, Literal, NoReturn
 
 from discord import Embed
@@ -18,7 +17,6 @@ import bot.client as Client
 from utils.models.thunderapi.generic import NewsModel
 from utils.thunderapi import news_ws
 
-
 class News:
 	id:int
 	anons:str # Short description
@@ -31,30 +29,25 @@ class News:
 	project:str # Game (100% of the time War Thunder with different version numbers)
 	type:Literal["news", "changelog"] # Article Type
 	created:datetime # Article Creation Time
-	importance:ImportanceLevel
-	class ImportanceLevel(Enum):
-		REGULAR = 0
-		MINOR = 1
-		EVENT = 2
-		MAJOR = 3
+	importance:NewsModel.ImportanceLevel
 	class Image:
-		def __init__(self, item:dict):
-			self.src:str = item['src']
-			self.width:int = int(item['width'])
-			self.height:int = int(item['height'])
+		def __init__(self, item:NewsModel.Image):
+			self.src:str = item.src
+			self.width:int = int(item.width)
+			self.height:int = int(item.height)
 	def __init__(self, item:NewsModel):
-		self.id = int(item['id'])
-		self.anons = item['anons']
-		self.title = item['title']
-		self.link = item['link']
-		self.pinned = item['pinned']
-		self.images = tuple([self.Image(i) for i in item['images']])
-		self.tags = set(item['tags'])
-		self.platforms = item['platforms']
-		self.project = item['project']
-		self.type = item['type']
-		self.created = datetime.fromtimestamp(item['created'], UTC)
-		self.importance = self.ImportanceLevel(item["importance"])
+		self.id = int(item.id)
+		self.anons = item.anons
+		self.title = item.title
+		self.link = item.link
+		self.pinned = item.pinned
+		self.images = tuple([self.Image(i) for i in item.images])
+		self.tags = set(item.tags)
+		self.platforms = item.platforms
+		self.project = item.project
+		self.type = item.type
+		self.created = item.created
+		self.importance = item.importance
 	def buildEmbed(self) -> Embed:
 		embed = Embed(
 			title=self.title,

@@ -101,5 +101,5 @@ class AdminCog(commands.Cog):
 		await interaction.guild.unban(user, reason="softban")
 		await interaction.edit_original_response(content="User has been softbanned.")
 
-async def setup():
-	await Client.BOT.add_cog(AdminCog())
+async def setup(bot: Client._Bot):
+	await bot.add_cog(AdminCog())

@@ -17,7 +17,7 @@ def log_namer(default_name:str):
 	_, _, date = filename.rpartition(".")
 	return path.join(dirname, f"{date}.log")
 logger = logging.getLogger()
-handler = TimedRotatingFileHandler(paths.LOGS / "latest.json", when="midnight", interval=1, utc=True, backupCount=5)
+handler = TimedRotatingFileHandler(paths.LOGS / "latest.log", when="midnight", interval=1, utc=True, backupCount=5)
 handler.suffix = "%Y-%m-%d"
 formatter = logging.Formatter(f"%(asctime)s:%(name)-{min(max(len(ext) for ext in EXTENSIONS), 30)}s:%(funcName)-15s:%(lineno)-3d:%(levelname)-7s:%(message)s", datefmt="%Y-%m-%d %H:%M:%S")
 handler.setFormatter(formatter)

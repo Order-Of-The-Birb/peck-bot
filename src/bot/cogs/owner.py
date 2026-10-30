@@ -2,10 +2,13 @@ import asyncio
 import logging
 
 import discord
+from aiohttp import ClientSession
 from discord.ext import commands
 from psutil._common import bytes2human
 
 import bot.client as Client
+import utils.newsAPI as NewsAPI
+import utils.thunderapi as ThunderAPI
 from bot.cogs import EXTENSIONS
 from utils.memory import cache_counts, process_memory
 
@@ -18,9 +21,9 @@ __reload_deps__ = ("bot.client", "bot.config")
 async def reload_autocomplete(interaction: discord.Interaction, current: str):
 	options = [
 		discord.app_commands.Choice(name=i, value=i)
-		for i in [i.removeprefix("discord.") for i in EXTENSIONS] if current.lower() in i.lower()
+		for i in [i.removeprefix("bot.cogs.") for i in EXTENSIONS] if current.lower() in i.lower()
 	]
-	if current.lower() in "all":
+	if "all".startswith(current.lower()):
 		options.append(discord.app_commands.Choice(name="all", value="all"))
 	return options
 class OwnerCog(commands.Cog):
@@ -62,7 +65,7 @@ class OwnerCog(commands.Cog):
 				await Client.BOT.reload_module(extension)
 				await interaction.edit_original_response(content="Reloaded all cogs")
 			else:
-				full = f"discord.{extension}"
+				full = f"bot.cogs.{extension}"
 				await Client.BOT.reload_module(full)
 				await interaction.edit_original_response(content=f"Reloaded cog '{extension}'")
 		except Exception:
@@ -80,6 +83,17 @@ class OwnerCog(commands.Cog):
 		except Exception:
 			self.logger.exception("An error occured while syncing")
 			await interaction.edit_original_response(content="An error occurred while syncing")
+
+	@discord.app_commands.command()
+	@Client.debug_only()
+	async def test_news(self, interaction: discord.Interaction):
+		await interaction.response.defer(thinking=True)
+		async with ClientSession(ThunderAPI._api_url) as session, session.get("/v1/news") as r:
+			r.raise_for_status()
+			for item in await r.json():
+				news = NewsAPI.News(ThunderAPI.NewsModel.model_validate(item))
+				Client.BOT.dispatch("newsapi_post", news)
+		await interaction.edit_original_response(content="News posted")
 
 async def setup(bot: Client._Bot):
 	await bot.add_cog(OwnerCog())

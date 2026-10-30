@@ -190,5 +190,5 @@ class NormalCog(commands.Cog):
 			ephemeral=True
 		)
 
-async def setup():
-	await Client.BOT.add_cog(NormalCog())
+async def setup(bot: Client._Bot):
+	 await bot.add_cog(NormalCog())

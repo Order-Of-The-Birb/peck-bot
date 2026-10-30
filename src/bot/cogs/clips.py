@@ -66,5 +66,5 @@ class ClipsCog(commands.GroupCog, group_name="clips"):
 			await interaction.edit_original_response(content=f"No such alias found. The following aliases are connected to the given user: {"; ".join(aliases)}")
 			return
 
-async def setup():
-	await Client.BOT.add_cog(ClipsCog())
+async def setup(bot: Client._Bot):
+	 await bot.add_cog(ClipsCog())
