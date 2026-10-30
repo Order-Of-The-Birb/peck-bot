@@ -5,9 +5,6 @@ import sys
 from logging.handlers import TimedRotatingFileHandler
 from os import getenv, path
 
-from cryptography.fernet import Fernet
-
-# Custom packages
 import bot.client as Client
 import paths
 from bot.cogs import EXTENSIONS
@@ -34,12 +31,6 @@ if __TOKEN is None:
 	raise OSError("Bot Token could not be retrieved. Exiting...")
 
 def main():
-	if not paths.KEY.exists():
-		logger.info("No database key found, generating.")
-		key = Fernet.generate_key()
-		paths.KEY.write_bytes(key)
-	paths.FERNET = Fernet(paths.KEY.read_bytes())
-
 	# region Client setup
 	loop = asyncio.new_event_loop()
 	asyncio.set_event_loop(loop)

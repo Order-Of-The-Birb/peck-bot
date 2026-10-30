@@ -1,7 +1,6 @@
 from os import getenv
 from pathlib import Path
 
-from cryptography.fernet import Fernet
 from dotenv import load_dotenv
 
 if not load_dotenv(Path(__file__).parent.parent / ".env"):
@@ -12,5 +11,3 @@ DATA = Path("/data") if not DEBUG else Path(__file__).parent.parent / "data"
 
 GUILDS = DATA / "guilds"
 LOGS = DATA / "logs"
-KEY = DATA / "token.key"
-FERNET: Fernet

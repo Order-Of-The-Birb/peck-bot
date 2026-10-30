@@ -9,4 +9,3 @@ fastapi
 uvicorn
 matplotlib
 pydantic
-cryptography
