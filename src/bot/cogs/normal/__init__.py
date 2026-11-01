@@ -133,13 +133,13 @@ class NormalCog(commands.Cog):
 		if not (db_user := await management.get(discord_id=user.id)):
 			await interaction.edit_original_response(content="User not found")
 			return
-		await interaction.edit_original_response(content=f"User(s) found: {", ".join(f"{i.username}" for i in db_user)}")
+		await interaction.edit_original_response(content=f"Account(s) found: \n{"\n".join(f"- {i.username}" for i in db_user)}")
 
 	@group_requests.command(name="discord")
 	@discord.app_commands.describe(user="The War Thunder username to search for")
 	async def request_dc(self, interaction: discord.Interaction, user:str):
 		"""Requests a user's ID based on the WT username in the database"""
-		await interaction.response.defer(thinking=True)
+		await interaction.response.defer(thinking=True, ephemeral=True)
 		config = await Config.get(interaction)
 		if config is None:
 			await interaction.edit_original_response(content="This server is not yet configured.")
@@ -149,12 +149,10 @@ class NormalCog(commands.Cog):
 			await interaction.edit_original_response(content="This server's management token is not yet configured.")
 			return
 
-		if (db_user := await management.get(username=user)) is not None:
-			dcuser = interaction.guild.get_member(db_user.discord_id)
-			if dcuser is None:
-				await interaction.edit_original_response(content=f"User can no longer be found in the server (User ID was {db_user.discord_id})")
-			else:
-				await interaction.edit_original_response(content=f"User found: {dcuser.name} ({dcuser.id})")
+		if (db_users := await management.get(username=user)) is not None:
+			await interaction.edit_original_response(
+				content=f"User(s) found:\n{"\n".join(f"- {i.mention}" for j in db_users if (i := interaction.guild.get_member(j.discord_id)) is not None)}"
+			)
 		else:
 			await interaction.edit_original_response(content="User not found")
 	# endregion

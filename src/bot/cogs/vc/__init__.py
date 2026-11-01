@@ -1,4 +1,4 @@
-import logging
+import logging, asyncio
 import re
 from datetime import UTC, datetime, timedelta
 
@@ -55,7 +55,7 @@ vc_check_frequency = timedelta(minutes=30)
 SQUADVC_RE = re.compile(r"squad (\d+)", re.IGNORECASE)
 class VcCog(commands.GroupCog, group_name="squad"):
 	voice_channels: dict[int, SquadVC]
-	check_task: tasks.Loop
+	check_task: asyncio.Task
 	def __init__(self):
 		self.logger = logging.getLogger(__name__)
 		self.logger.debug(f"{self.__class__.__name__} initialized")
@@ -92,8 +92,8 @@ class VcCog(commands.GroupCog, group_name="squad"):
 		squad_numbers = [int(i.name.split()[-1]) for i in squad_voice_channels]
 
 		pos = squad_voice_channels[-1].position+1
-		lowest = len(squad_voice_channels)
-		for i in range(lowest):
+		lowest = len(squad_voice_channels)+1
+		for i in range(1, lowest):
 			if i in squad_numbers:
 				continue
 			pos = squad_voice_channels[i].position+1
@@ -135,7 +135,6 @@ class VcCog(commands.GroupCog, group_name="squad"):
 		return await super().cog_load()
 	async def cog_unload(self):
 		self.check_task.cancel()
-		await self.check_task
 		return await super().cog_unload()
 	#endregion
 

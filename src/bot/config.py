@@ -14,7 +14,7 @@ import bot.client as Client
 import utils.network as Network
 from paths import GUILDS
 
-__MANAGEMENT_URL: str = getenv("management_api_url", "http://127.0.0.1:8000/").strip().removesuffix("/")
+_MANAGEMENT_URL: str = getenv("management_api_url", "http://127.0.0.1:8000/").strip().removesuffix("/")
 
 class Channels(StrEnum):
 	ANNOUNCEMENTS = "ANNOUNCEMENTS"
@@ -100,14 +100,14 @@ class GuildConfig:
 			async def list_users(page:int = 1) -> tuple["GuildConfig._Management.Entry", ...]:
 				if page < 1:
 					raise ValueError("Page value must be above 0")
-				async with Network.get(f"{__MANAGEMENT_URL}/api/v1/users?page={page}&per_page=50") as r:
+				async with Network.get(f"{_MANAGEMENT_URL}/api/v1/users?page={page}&per_page=50") as r:
 					data = (await r.json())["data"]
 				for i, user in enumerate(data):
 					data[i] = GuildConfig._Management.Entry.from_dict(user)
 				return tuple(data)
 
 			async def context(self) -> tuple["ContextModels.AbsenceOnce | ContextModels.AbsenceRecurring | ContextModels.Miscellaneous", ...]:
-				async with Network.get(f"{__MANAGEMENT_URL}/api/v1/users/{self.gaijin_id}/context") as r:
+				async with Network.get(f"{_MANAGEMENT_URL}/api/v1/users/{self.gaijin_id}/context") as r:
 					data: list[dict[str, int|str|list[str]]] = await r.json()
 				parsed = []
 				for item in data:
@@ -134,7 +134,7 @@ class GuildConfig:
 				return tuple(parsed)
 
 		@overload
-		async def get(self, *, username:str, discord_id: int | None = None, gaijin_id: int | None = None) -> "Entry | None": ...
+		async def get(self, *, username:str, discord_id: int | None = None, gaijin_id: int | None = None) -> tuple["Entry", ...]: ...
 		@overload
 		async def get(self, *, username:str | None = None, discord_id: int, gaijin_id: int | None = None) -> tuple["Entry", ...]: ...
 		@overload
@@ -151,30 +151,20 @@ class GuildConfig:
 				users = []
 				try:
 					while True:
-						async with Network.get(
-							f"{__MANAGEMENT_URL}/api/v1/users?search={user}&page={i}",
-							headers={
-								"Authorization": f"Bearer {self.token}"
-							}
-						) as r:
+						async with Network.get(f"{_MANAGEMENT_URL}/api/v1/users?search={user}&page={i}") as r:
 							r.raise_for_status()
 							data = (await r.json())["data"]
 						if data == []:
-							if username:
-								return None
-							if discord_id:
-								return tuple(users)
+							return tuple(users)
 						for _user in data:
-							if username and _user["username"] == user:
-								return self.Entry.from_dict(_user)
-							elif discord_id and _user["discord_id"] == user:
+							if (username and user in _user["username"]) or (discord_id and _user["discord_id"] == user):
 								users.append(self.Entry.from_dict(_user))
 						i += 1
 				except ClientResponseError:
 					return None
 
 			elif gaijin_id:
-				async with Network.get(f"{__MANAGEMENT_URL}/api/v1/users/{gaijin_id}") as r:
+				async with Network.get(f"{_MANAGEMENT_URL}/api/v1/users/{gaijin_id}") as r:
 					data = (await r.json())["data"]
 				if not data:
 					return

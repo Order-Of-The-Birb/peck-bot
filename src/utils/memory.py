@@ -67,6 +67,5 @@ def cache_counts(bot) -> dict[str, int | None]:
 		"members": sum(guild.member_count or 0 for guild in bot.guilds),
 		"cached_members": sum(len(guild._members) for guild in bot.guilds),
 		"modals": len(modals) if modals is not None else None,
-		"view_message_keys": len(views) if views is not None else None,
-		"repository_users": len(bot.db),
+		"view_message_keys": len(views) if views is not None else None
 	}

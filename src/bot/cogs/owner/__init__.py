@@ -51,7 +51,7 @@ class OwnerCog(commands.Cog):
 		lines.append(f"Cached messages: {counts['messages']} / {counts['message_limit']}")
 		lines.append(f"Cached members: {counts['cached_members']} / {counts['members']}")
 		lines.append(f"Open forms: {counts['modals']}; view message keys: {counts['view_message_keys']}")
-		lines.append(f"Repository users: {counts['repository_users']}; async tasks: {len(asyncio.all_tasks())}")
+		lines.append(f"Async tasks: {len(asyncio.all_tasks())}")
 		lines.append("RSS includes shared pages; child RSS totals can double-count shared memory.")
 		await interaction.edit_original_response(content="\n".join(lines))
 

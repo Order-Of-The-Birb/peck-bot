@@ -47,7 +47,10 @@ class _Bot(commands.Bot):
 			module = sysmodules.get(mod)
 			if module is None:
 				return
-			for dep in getattr(module, "__reload_deps__", ()):
+			deps = getattr(module, "__reload_deps__", ())
+			if isinstance(deps, str): # Protection against missing commas
+				deps = (deps,)
+			for dep in deps:
 				for name, submodule in tuple(sysmodules.items()):
 					if submodule is None or not name.startswith(dep) or name in reloaded:
 						continue

@@ -26,7 +26,7 @@ async def setup_channel(channel: discord.ForumChannel, user: discord.Member):
 		user_thread = tmp.thread
 	return voting_thread, user_thread
 
-class CreateClip(discord.ui.Modal, title="Clip upload"):
+class CreateClip(discord.ui.Modal, title="Propose new clip"):
 	user = discord.ui.Label(
 		text="User",
 		component=discord.ui.UserSelect(
@@ -87,7 +87,7 @@ class CreateClip(discord.ui.Modal, title="Clip upload"):
 			await asyncio.sleep(0.5)
 		await interaction.edit_original_response(content=f"Clip for {user.mention} has been cast to vote.")
 
-class CreateAlias(discord.ui.Modal, title="Add alias"):
+class CreateAlias(discord.ui.Modal, title="Propose new alias"):
 	userCh = discord.ui.Label(
 		text="User to upload for",
 		component=discord.ui.UserSelect(
@@ -133,3 +133,7 @@ class CreateAlias(discord.ui.Modal, title="Add alias"):
 		await asyncio.sleep(0.2)
 		await msg.add_reaction(interaction.client.get_emoji(1277999500262244362))
 		await interaction.edit_original_response(content=f"Alias for {selected_user.mention} has been cast to vote.")
+
+class RemoveAlias(discord.ui.LayoutView):
+	#TODO: Implement alias removal view
+	pass

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import UTC, datetime, time, timedelta
 
@@ -17,7 +18,7 @@ from bot.views import Views
 __reload_deps__ = ("bot.client", "bot.config", "bot.views", "utils.time", "utils.thunderapi")
 
 class SQBCog(commands.GroupCog, group_name="sqb"):
-	posting_task: tasks.Loop
+	posting_task: asyncio.Task
 	def __init__(self):
 		self.asked_users = {}
 		self.logger = logging.getLogger(__name__)
@@ -77,7 +78,7 @@ class SQBCog(commands.GroupCog, group_name="sqb"):
 			await interaction.edit_original_response(content=f"Could not find user '{identifier}' in the database")
 			return
 		current_br = await ThunderAPI.clan.current_bracket()
-		message = f"Hello {user.username}!\nYou have been drafted for SQB.\nThe current BR is {current_br.bracket.br}\n{await config.random_propaganda(interaction.guild_id)}"
+		message = f"Hello {user.username}!\nYou have been drafted for SQB.\nThe current BR is {current_br.bracket.br}\n{await config.random_propaganda()}"
 		dc_user2 = Client.BOT.get_user(user.discord_id)
 		async def accept(interaction2:discord.Interaction):
 			await interaction2.followup.send(f"Splendid, please join <#{config.get(Config.Channels.SQB)}> to start participating!")
@@ -165,7 +166,6 @@ class SQBCog(commands.GroupCog, group_name="sqb"):
 		return await super().cog_load()
 	async def cog_unload(self):
 		self.posting_task.cancel()
-		await self.posting_task
 		return await super().cog_unload()
 	#endregion
 
