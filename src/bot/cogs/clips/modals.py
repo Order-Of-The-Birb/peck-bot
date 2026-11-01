@@ -1,7 +1,9 @@
-import discord, asyncio
+import asyncio
 
-import utils.helper as helperUtil
+import discord
+
 import bot.config as Config
+import utils.helper as helperUtil
 
 __reload_deps__ = ("bot.config","utils.helper")
 

@@ -8,11 +8,11 @@ from discord.ext import commands
 
 import bot.client as Client
 import bot.config as Config
+import paths as Paths
 import utils.helper as genericUtil
 import utils.helper as helperUtil
 import utils.newsAPI as NewsAPI
 import utils.time as timeUtil
-import paths as Paths
 
 # "utils.generic", "utils.media",
 # "utils.memory", "utils.network", "utils.newsAPI",

@@ -14,13 +14,14 @@ import utils.helper as genericUtil
 import utils.media as Media
 import utils.thunderapi as ThunderAPI
 import utils.time as timeUtil
-from bot.views import Modals
+
+from . import modals as Modals
 
 # "utils.generic", "utils.helper", "utils.media",
 # "utils.memory", "utils.network", "utils.newsAPI",
 # "utils.resources", "utils.thunderapi", "utils.time"
 # "bot.views", "bot.client", "bot.config"
-__reload_deps__ = ("bot.client", "bot.config", "utils.generic", "utils.time", "bot.views", "utils.thunderapi", "utils.media")
+__reload_deps__ = ("bot.client", "bot.config", "utils.generic", "utils.time", "utils.thunderapi", "utils.media", "bot.cogs.normal.modals")
 
 def toSelectList(names:list[str]) -> list[discord.SelectOption]: return [discord.SelectOption(label=name) for name in names]
 class NormalCog(commands.Cog):
@@ -31,8 +32,7 @@ class NormalCog(commands.Cog):
 	@discord.app_commands.command(description="Command to report a squadron member")
 	@discord.app_commands.guild_only()
 	async def report(self, interaction: discord.Interaction):
-
-		await interaction.response.send_modal(Modals.ReportModal(Client.BOT))
+		await interaction.response.send_modal(Modals.ReportModal())
 
 	@discord.app_commands.command()
 	async def info(self, interaction:discord.Interaction):
