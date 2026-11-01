@@ -1,34 +1,13 @@
+import asyncio
 import re
-from datetime import timedelta
 from logging import getLogger as _gL
 from typing import Protocol
 
 import discord
-from discord import (
-	Attachment,
-	ButtonStyle,
-	Interaction,
-	Member,
-	NotFound,
-	Permissions,
-	TextChannel,
-	TextStyle,
-)
-from discord.ui import (
-	Button,
-	FileUpload,
-	Label,
-	Modal,
-	Select,
-	TextDisplay,
-	TextInput,
-	UserSelect,
-	View,
-)
+from discord.ui import Modal, View
 
-import bot.client as Client
 import bot.config as Config
-import utils.media as Media
+import utils.helper as helperUtil
 import utils.thunderapi as ThunderAPI
 
 __reload_deps__ = ("utils.media", "bot.client", "bot.config", "utils.thunderapi")
@@ -38,146 +17,157 @@ class Persistent:
 	pass
 
 class Modals:
-	class CreateClipCh(Modal, title="Upload Clip"):
-		userCh = Label(
-			text="User to upload for",
-			component=UserSelect(
-				required=True,
-				max_values=1,
-				min_values=1,
-				id=0
-			)
-		)
-		_ = TextDisplay(content="Provide at least one of the items below")
-		clips = Label(
-			text="Clip",
-			component=FileUpload(
-				min_values=1,
-				required=False,
-				id=1
-			)
-		)
-		medal_url = Label(
-			text="Medal share link",
-			component=TextInput(
-				placeholder="https://medal.tv/games/war-thunder/clips/...",
-				min_length=42,
-				required=False,
-				id=2
-			)
-		)
-		def __init__(self):
-			super().__init__(timeout=15 * 60)
-		async def on_submit(self, interaction:Interaction):
-			await interaction.response.defer(ephemeral=True, thinking=True)
-			VIDEO_FORMATS = [".mp4", ".mov", ".webm"]
-
-			config = await Config.get(interaction.guild_id)
-			if not config:
-				await interaction.edit_original_response(content="Could not get guild configs. No changes were made.")
-				return
-
-			selected_user:Member = self.find_item(0).values[0]
-
-			clips_channel = config.get(Config.Channels.CLIPS)
-			if clips_channel is None:
-				await interaction.edit_original_response(content="This server is not configured for clips.")
-				return
-			voting_thread: discord.Thread | None = None
-			user_thread: discord.Thread | None = None
-			for thread in clips_channel.threads:
-				if voting_thread is None and thread.flags.pinned:
-					voting_thread = thread
-					continue
-				try:
-					if int(thread.name) == selected_user.id:
-						user_thread = thread
-						continue
-				except ValueError:
-					if "voting" in thread.name.strip().lower():
-						voting_thread = await thread.edit(pinned=True)
-				if voting_thread is not None and user_thread is not None:
-					break
-			else:
-				async for thread in clips_channel.archived_threads(limit=None):
-					if voting_thread is None and thread.flags.pinned:
-						voting_thread = thread
-						continue
-					if int(thread.name) == selected_user.id:
-						user_thread = thread
-						continue
+	class Clips:
+		@staticmethod
+		async def setup_channel(channel: discord.ForumChannel, user: discord.Member):
+			voting_thread, user_thread = await helperUtil.get_clip_threads(channel, user.id)
 			if voting_thread is None:
-				voting_thread = await clips_channel.create_thread(
+				tmp = await channel.create_thread(
 					name="Voting Booth",
 					reason="No voting thread beforehand",
 					content="This thread is used to vote about uploaded clips, about whether they are worthy, or relevant to the user"
 				)
-				await thread.edit(pinned=True)
-
-			clips:list[Attachment] = self.find_item(1).values
-			medal_url:str = self.find_item(2).value
-			if not (clips or medal_url):
-				await interaction.edit_original_response(content="You didn't provide a clip nor a medal url.")
-				return
-			for clip in clips:
-				for ext in VIDEO_FORMATS:
-					if clip.filename.lower().endswith(ext):
-						break
-				else:
-					await interaction.edit_original_response(content=f"One of the attachments were not an accepted video format. The following formats are accepted: {", ".join(VIDEO_FORMATS)}")
-					return
-
+				voting_thread = tmp.thread
+				await voting_thread.edit(pinned=True)
 			if user_thread is None:
-				user_thread = await clips_channel.create_thread(
-					name=str(selected_user.id),
-					content=f"Channel for clips about {selected_user.mention}\nKnown aliases:\n",
+				tmp = await channel.create_thread(
+					name=str(user.id),
+					content=f"Channel for clips about {user.mention}\nKnown aliases:\n",
 					reason="User clip channel request"
 				)
-			if medal_url:
-				try:
-					clips = [await Media.medalDownload(interaction.guild_id, medal_url)]
-				except LookupError as e:
-					await interaction.edit_original_response(content=f"Something went wrong when trying to download the clip: {e}")
-					return
-			else:
-				clips = [await clip.to_file() for clip in clips]
+				user_thread = tmp.thread
+			return voting_thread, user_thread
 
-			clipPoll = discord.Poll(
-				question=f"Is this appropriate for being related to {selected_user.mention}?",
-				duration=timedelta(days=3)
+		class CreateClip(Modal, title="Clip upload"):
+			user = discord.ui.Label(
+				text="User",
+				component=discord.ui.UserSelect(
+					custom_id="selected_user",
+					min_values=1,
+					max_values=1,
+					required=True,
+					id=0
+				),
+				description="The user this clip will be added under"
 			)
-			clipPoll.add_answer(text="Yes", emoji="✅") # :white_check_mark:
-			clipPoll.add_answer(text="No", emoji=Client.BOT.get_emoji(758380151238033419)) # :redcross:
-			for clip in clips:
-				await voting_thread.send(
-					content=f"Sent by: {interaction.user.mention}\nDestination: {user_thread.mention}\nAwaiting vote...\n\nResults so far:\n\tFor: 0\n\tAgainst: 0",
-					file=clip,
-					poll=clipPoll
+			files = discord.ui.Label(
+				text="The clip(s)",
+				component=discord.ui.FileUpload(
+					min_values=1,
+					max_values=10,
+					required=True,
+					id=1
+				),
+				description="Please keep it relevant to the given user"
+			)
+			def __init__(self):
+				super().__init__(timeout=600)
+
+			async def on_submit(self, interaction: discord.Interaction):
+				self.stop()
+				await interaction.response.defer(thinking=True, ephemeral=True)
+
+				config = await Config.get(interaction.guild_id)
+				if not config:
+					await interaction.edit_original_response(content="Could not get guild configs. No changes were made.")
+					return
+
+				clips_channel = config.get(Config.Channels.CLIPS)
+				if clips_channel is None:
+					await interaction.edit_original_response(content="This server is not configured for clips.")
+					return
+
+				VIDEO_FORMATS = [".mp4", ".mov", ".webm"]
+				files: list[discord.File] = []
+				for file in self.find_item(1).values:
+					file: discord.Attachment
+					if not any(file.filename.endswith(i) for i in VIDEO_FORMATS):
+						raise ValueError("Invalid file format given for one of the clips")
+					files.append(await file.to_file())
+
+				user: discord.Member = self.find_item(0).values[0]
+
+				voting_thread, _ = await Modals.Clips.setup_channel(clips_channel, user)
+				for clip in files:
+					msg = await voting_thread.send(
+						content=f"## Clip vote\nProposed by: {interaction.user.mention}\nProposed for: {user.mention}\nAwaiting vote...",
+						file=clip
+					)
+					await msg.add_reaction(interaction.client.get_emoji(1277999470038220902))
+					await asyncio.sleep(0.2)
+					await msg.add_reaction(interaction.client.get_emoji(1277999500262244362))
+					await asyncio.sleep(0.5)
+				await interaction.edit_original_response(content=f"Clip for {user.mention} has been cast to vote.")
+
+		class CreateAlias(Modal, title="Add alias"):
+			userCh = discord.ui.Label(
+				text="User to upload for",
+				component=discord.ui.UserSelect(
+					required=True,
+					max_values=1,
+					min_values=1,
+					id=0
 				)
-			await interaction.edit_original_response(content=f"Clip for {selected_user} has been cast to vote.")
+			)
+			userAlias = discord.ui.Label(
+				text="Alias of user",
+				component=discord.ui.TextInput(
+					required=True,
+					min_length=1,
+					max_length=64,
+					style=discord.TextStyle.short
+				)
+			)
+			def __init__(self):
+				super().__init__(timeout=600)
+
+			async def on_submit(self, interaction:discord.Interaction):
+				await interaction.response.defer(ephemeral=True, thinking=True)
+
+				config =await Config.get(interaction.guild_id)
+				if not config:
+					await interaction.edit_original_response(content="Could not get guild configs. No changes were made.")
+					return
+
+				clips_channel = config.get(Config.Channels.CLIPS)
+				if clips_channel is None:
+					await interaction.edit_original_response(content="This server is not configured for clips.")
+					return
+
+				selected_user:discord.Member = self.userCh.component.values[0]
+				alias:str = self.userAlias.component.value
+
+				voting_thread, _ = await Modals.Clips.setup_channel(clips_channel, selected_user)
+				msg = await voting_thread.send(
+					content=f"## Alias vote\nProposed by: {interaction.user.mention}\nProposed for: {selected_user.mention}\nAlias: \"{alias}\"\nAwaiting vote..."
+				)
+				await msg.add_reaction(interaction.client.get_emoji(1277999470038220902))
+				await asyncio.sleep(0.2)
+				await msg.add_reaction(interaction.client.get_emoji(1277999500262244362))
+				await interaction.edit_original_response(content=f"Alias for {selected_user.mention} has been cast to vote.")
 
 	class AddAlias(Modal, title="Add alias to user"):
-		userCh = Label(
+		userCh = discord.ui.Label(
 			text="User to upload for",
-			component=UserSelect(
+			component=discord.ui.UserSelect(
 				required=True,
 				max_values=1,
 				min_values=1,
 				id=0
 			)
 		)
-		userAlias = Label(
+		userAlias = discord.ui.Label(
 			text="Alias of user",
-			component=TextInput(
+			component=discord.ui.TextInput(
 				required=True,
 				min_length=1,
 				max_length=64,
-				style=TextStyle.short
+				style=discord.TextStyle.short
 			)
 		)
 		def __init__(self):
 			super().__init__(timeout=15 * 60)
-		async def on_submit(self, interaction:Interaction):
+		async def on_submit(self, interaction:discord.Interaction):
 			await interaction.response.defer(ephemeral=True, thinking=True)
 
 			config =await Config.get(interaction.guild_id)
@@ -185,25 +175,24 @@ class Modals:
 				await interaction.edit_original_response(content="Could not get guild configs. No changes were made.")
 				return
 
-			selected_user:Member = self.userCh.component.values[0]
+			selected_user:discord.Member = self.userCh.component.values[0]
 			alias:str = self.userAlias.component.value
-			CLIPS_CATEGORY = config.get(Config.Categories.CLIPS)
-			if CLIPS_CATEGORY is None:
-				raise LookupError("Could not find the Clips category")
-			subjects = CLIPS_CATEGORY.text_channels
-			_logger.debug(f"Subjects: {subjects}")
-			_logger.debug(f"Category: {CLIPS_CATEGORY}")
-			if not any(int(i.name) == selected_user.id for i in subjects):
-				await interaction.edit_original_response(content="The selected user does not have a clip channel. Use the command `/upload_clip` to create one")
-				return
-			channel:TextChannel = next(i for i in subjects if int(i.name) == selected_user.id)
-			await channel.send(content=f"User '{interaction.user.name}' ({interaction.user.id}) suggested the following alias for user:\n\"{alias}\"\nAwaiting confirmation...")
-			await interaction.edit_original_response(content=f"Uploaded alias for {selected_user}. Said alias will be accessible after admin confirmation.")
+			clips_channel = config.get(Config.Channels.CLIPS)
+			if clips_channel is None:
+				raise LookupError("Could not find the Clips channel")
+			async for thread in helperUtil.get_threads(clips_channel):
+				if not thread.flags.pinned:
+					continue
+				msg = await thread.send(f"## Alias vote\nNew alias proposed for user {selected_user.mention}:\n\t{alias}\n\nAwaiting vote...")
+				await msg.add_reaction(interaction.client.get_emoji(1277999470038220902))
+				await asyncio.sleep(0.2)
+				await msg.add_reaction(interaction.client.get_emoji(1277999500262244362))
+				await asyncio.sleep(0.5)
 
 	class ReportModal(Modal, title="Report user"):
-		user = Label(
+		user = discord.ui.Label(
 			text="War Thunder Username",
-			component=TextInput(
+			component=discord.ui.TextInput(
 				min_length=2,
 				max_length=16,
 				required=True,
@@ -213,9 +202,9 @@ class Modals:
 			),
 			description="The War Thunder username of the player. If they are on console adding the @psn or @live tags is optional"
 		)
-		type = Label(
+		type = discord.ui.Label(
 			text="Category",
-			component=Select(
+			component=discord.ui.Select(
 				min_values=1,
 				max_values=1,
 				options=[
@@ -230,9 +219,9 @@ class Modals:
 			),
 			description="The category the user's infraction would fall under"
 		)
-		message = Label(
+		message = discord.ui.Label(
 			text="Message",
-			component=TextInput(
+			component=discord.ui.TextInput(
 				min_length=1,
 				max_length=2048,
 				custom_id="report_msg",
@@ -242,9 +231,9 @@ class Modals:
 			),
 			description="The message you wish for us to see"
 		)
-		replayURL = Label(
+		replayURL = discord.ui.Label(
 			text="Evidence replay URL",
-			component=TextInput(
+			component=discord.ui.TextInput(
 				min_length=44,
 				max_length=70,
 				placeholder="https://warthunder.com/en/tournament/replay/...",
@@ -269,7 +258,7 @@ class Modals:
 				return
 
 			url:str = self.replayURL.component.value.strip().rstrip("/")
-			report_category:Select = self.find_item(69)
+			report_category:discord.ui.Select = self.find_item(69)
 
 			username:str = self.user.component.value.strip()
 			member = await management.get(username=username)
@@ -312,25 +301,25 @@ class Views:
 		class _callbackProtocol(Protocol):
 			async def __call__(
 				self,
-				interaction: Interaction,
+				interaction: discord.Interaction,
 				**kwargs
 			) -> bool|None: ...
-		def __init__(self, *, acceptFunc:_callbackProtocol, denyFunc:_callbackProtocol|None=None, timeout:int|None = 180, acceptLabel:str = "Yes", denyLabel:str="No", deny:bool=True, removeButtonsAfter:bool=False, requiredPerms:Permissions|None=None, id: str | None = None, **kwargs):
+		def __init__(self, *, acceptFunc:_callbackProtocol, denyFunc:_callbackProtocol|None=None, timeout:int|None = 180, acceptLabel:str = "Yes", denyLabel:str="No", deny:bool=True, removeButtonsAfter:bool=False, requiredPerms:discord.Permissions|None=None, id: str | None = None, **kwargs):
 			if deny and denyFunc is None:
 				raise ValueError("deny=True requires denyFunc to be provided")
 			self.requiredPerms = requiredPerms
 			super().__init__(timeout=timeout)
-			yes = Button(
+			yes = discord.ui.Button(
 				label=acceptLabel,
-				style=ButtonStyle.green,
+				style=discord.ButtonStyle.green,
 				custom_id="accept"
 			)
-			no = Button(
+			no = discord.ui.Button(
 				label=denyLabel,
-				style=ButtonStyle.red,
+				style=discord.ButtonStyle.red,
 				custom_id="deny"
 			)
-			async def yes_callback(interaction: Interaction):
+			async def yes_callback(interaction: discord.Interaction):
 				await interaction.response.edit_message(view=self)
 				if self.requiredPerms is not None and not all(getattr(interaction.user.guild_permissions, p[0], False) for p in self.requiredPerms if p[1]):
 					_logger.warning(f"Accept attempt by: {interaction.user.name} ({interaction.user.id})")
@@ -345,9 +334,9 @@ class Views:
 					if removeButtonsAfter:
 						try:
 							await interaction.edit_original_response(view=None)
-						except NotFound:
+						except discord.NotFound:
 							pass # The callback may already have deleted the message.
-			async def no_callback(interaction: Interaction):
+			async def no_callback(interaction: discord.Interaction):
 				await interaction.response.edit_message(view=self)
 				if self.requiredPerms is not None and not all(getattr(interaction.user.guild_permissions, p[0], False) for p in self.requiredPerms if p[1]):
 					_logger.warning(f"Deny attempt by: {interaction.user.name} ({interaction.user.id})")
@@ -361,10 +350,13 @@ class Views:
 					if removeButtonsAfter:
 						try:
 							await interaction.edit_original_response(view=None)
-						except NotFound:
+						except discord.NotFound:
 							pass # The callback may already have deleted the message.
 			yes.callback = yes_callback
 			no.callback = no_callback
 			self.add_item(yes)
 			if deny and denyFunc is not None:
 				self.add_item(no)
+
+class LayoutViews:
+	pass

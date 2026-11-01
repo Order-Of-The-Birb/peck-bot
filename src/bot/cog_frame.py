@@ -7,7 +7,7 @@ import bot.client as Client
 # "utils.generic", "utils.media",
 # "utils.memory", "utils.network", "utils.newsAPI",
 # "utils.resources", "utils.thunderapi", "utils.time"
-# "bot.modals", "bot.client", "bot.config"
+# "bot.views", "bot.client", "bot.config"
 __reload_deps__ = ("bot.client", "bot.config")
 
 class className(commands.GroupCog, group_name=""):

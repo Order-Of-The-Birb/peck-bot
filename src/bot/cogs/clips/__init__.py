@@ -6,15 +6,13 @@ from discord.ext import commands
 #import utils.time as timeUtil
 import bot.client as Client
 import bot.config as Config
-
-# owner_only, officer_only, members_only, debug_only
-from bot.modals import Modals
+from . import modals as Modals
 
 # "utils.generic", "utils.media",
 # "utils.memory", "utils.network", "utils.newsAPI",
 # "utils.resources", "utils.thunderapi", "utils.time"
-# "bot.modals", "bot.client", "bot.config"
-__reload_deps__ = ("bot.client", "bot.config", "bot.modals")
+# "bot.views", "bot.client", "bot.config"
+__reload_deps__ = ("bot.client", "bot.config")
 
 class ClipsCog(commands.GroupCog, group_name="clips"):
 	def __init__(self):
@@ -23,12 +21,11 @@ class ClipsCog(commands.GroupCog, group_name="clips"):
 
 	@discord.app_commands.command(name="upload")
 	async def upload_clip(self, interaction:discord.Interaction):
-		await interaction.response.send_modal(Modals.CreateClipCh())
+		await interaction.response.send_modal(Modals.CreateClip())
 
 	@discord.app_commands.command(name="add_alias")
-	@Client.admin_only()
 	async def add_alias(self, interaction:discord.Interaction):
-		await interaction.response.send_modal(Modals.AddAlias())
+		await interaction.response.send_modal(Modals.CreateAlias())
 
 	@discord.app_commands.command(name="remove_alias")
 	@discord.app_commands.default_permissions(manage_channels=True)

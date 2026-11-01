@@ -15,7 +15,7 @@ from utils.memory import cache_counts, process_memory
 # "utils.generic", "utils.media",
 # "utils.memory", "utils.network", "utils.newsAPI",
 # "utils.resources", "utils.thunderapi", "utils.time"
-# "bot.modals", "bot.client", "bot.config"
+# "bot.views", "bot.client", "bot.config"
 __reload_deps__ = ("bot.client", "utils.thunderapi", "utils.newsAPI")
 
 async def reload_autocomplete(interaction: discord.Interaction, current: str):

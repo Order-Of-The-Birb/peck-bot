@@ -1,21 +1,23 @@
 import asyncio
 import logging
+import re
 from datetime import UTC, datetime, timedelta
-from re import sub as re_sub
 
 import discord
 from discord.ext import commands
 
 import bot.client as Client
 import bot.config as Config
-import utils.generic as genericUtil
+import utils.helper as genericUtil
+import utils.helper as helperUtil
 import utils.newsAPI as NewsAPI
 import utils.time as timeUtil
+import paths as Paths
 
 # "utils.generic", "utils.media",
 # "utils.memory", "utils.network", "utils.newsAPI",
 # "utils.resources", "utils.thunderapi", "utils.time"
-# "bot.modals", "bot.client", "bot.config"
+# "bot.views", "bot.client", "bot.config"
 __reload_deps__ = ("bot.client", "bot.config", "utils.generic", "utils.time",  "utils.newsAPI")
 
 sqb_member_last_seen = datetime.now(UTC)-timedelta(minutes=30)
@@ -89,6 +91,55 @@ class Listeners(commands.Cog):
 			embed.add_field(name="Length of stay", value=f"{member.joined_at.strftime("%Y.%m.%d")}-{datetime.now(UTC).strftime("%Y.%m.%d")}")
 			await logs_channel.send(embed=embed)
 
+	# endregion
+	# region Reactions
+	@commands.Cog.listener()
+	async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
+		if payload.member.bot:
+			return
+
+		config = await Config.get(payload.guild_id)
+		if config is None:
+			return
+		message = (
+			await Client.BOT.get_partial_messageable(payload.channel_id, guild_id=payload.guild_id)
+			.get_partial_message(payload.message_id)
+			.fetch()
+		)
+		votes_channel = config.get(Config.Channels.CLIPS)
+		if (thread := votes_channel.get_thread(payload.channel_id)) is not None and thread.flags.pinned:
+			lower_content = message.content.lower()
+			for_votes, against_votes = helperUtil.count_votes(message)
+			if for_votes+against_votes < (10 if not Paths.DEBUG else 1):
+				return # Not enough votes
+			if for_votes/(for_votes+against_votes) >= 0.6:
+				ids = re.search(r"Proposed by: <@([0-9]+)>\nProposed for: <@([0-9]+)>", message.content, re.IGNORECASE)
+				if ids is None:
+					return
+				thread = await helperUtil.get_clip_thread(votes_channel, int(ids.group(2)))
+
+				if thread:
+					if lower_content.startswith("## clip vote"):
+						for attachment in message.attachments:
+							await thread.send(
+								content=f"Clip provided by <@{ids.group(1)}>",
+								file=await attachment.to_file()
+							)
+						await message.delete(delay=3)
+
+					elif lower_content.startswith("## alias vote"):
+						alias = re.search(r"Alias: \"([A-z0-9]+)\"", message.content, re.IGNORECASE)
+						if alias is None:
+							return
+						await thread.starter_message.edit(
+							content=thread.starter_message.content + f"\n- {alias}"
+						)
+						await message.delete(delay=3)
+					else:
+						return
+			else:
+				await message.delete(delay=3)
+		pass
 	# endregion
 	# region Message
 	trevortimes:int = 0
@@ -188,7 +239,7 @@ class Listeners(commands.Cog):
 	@commands.Cog.listener()
 	async def on_newsapi_post(self, data:NewsAPI.News):
 		self.logger.debug("Dispatch for NewsAPI post received")
-		_ = re_sub(r"\[[a-zA-Z0-9]+\]", "", data.title).strip()
+		_ = re.sub(r"\[[a-zA-Z0-9]+\]", "", data.title).strip()
 		title_truncated = _ if len(_) <= 100 else _[:97] + "..."
 		del _
 

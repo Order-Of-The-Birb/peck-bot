@@ -13,7 +13,7 @@ import bot.config as Config
 # "utils.generic", "utils.media",
 # "utils.memory", "utils.network", "utils.newsAPI",
 # "utils.resources", "utils.thunderapi", "utils.time"
-# "bot.modals", "bot.client", "bot.config"
+# "bot.views", "bot.client", "bot.config"
 __reload_deps__ = ("bot.client", "bot.config")
 
 class SquadVC:
@@ -44,7 +44,7 @@ class SquadVC:
 	async def update(self):
 		for channel, last_seen in self.channels.items():
 			ch = Client.BOT.get_channel(channel)
-			if ch.member_count > 0:
+			if len(ch.members) > 0:
 				self.channels[channel] = None
 			elif last_seen is None:
 				self.channels[channel] = datetime.now(UTC)

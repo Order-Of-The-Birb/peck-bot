@@ -8,13 +8,13 @@ import bot.client as Client
 import bot.config as Config
 import utils.thunderapi as ThunderAPI
 import utils.time as timeUtil
-from bot.modals import Views
+from bot.views import Views
 
 # "utils.generic", "utils.media",
 # "utils.memory", "utils.network", "utils.newsAPI",
 # "utils.resources", "utils.thunderapi", "utils.time"
-# "bot.modals", "bot.client", "bot.config"
-__reload_deps__ = ("bot.client", "bot.config", "bot.modals", "utils.time", "utils.thunderapi")
+# "bot.views", "bot.client", "bot.config"
+__reload_deps__ = ("bot.client", "bot.config", "bot.views", "utils.time", "utils.thunderapi")
 
 class SQBCog(commands.GroupCog, group_name="sqb"):
 	posting_task: tasks.Loop

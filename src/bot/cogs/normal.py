@@ -10,17 +10,17 @@ from psutil._common import bytes2human
 
 import bot.client as Client
 import bot.config as Config
-import utils.generic as genericUtil
+import utils.helper as genericUtil
 import utils.media as Media
 import utils.thunderapi as ThunderAPI
 import utils.time as timeUtil
-from bot.modals import Modals
+from bot.views import Modals
 
 # "utils.generic", "utils.helper", "utils.media",
 # "utils.memory", "utils.network", "utils.newsAPI",
 # "utils.resources", "utils.thunderapi", "utils.time"
-# "bot.modals", "bot.client", "bot.config"
-__reload_deps__ = ("bot.client", "bot.config", "utils.generic", "utils.time", "bot.modals", "utils.thunderapi", "utils.media")
+# "bot.views", "bot.client", "bot.config"
+__reload_deps__ = ("bot.client", "bot.config", "utils.generic", "utils.time", "bot.views", "utils.thunderapi", "utils.media")
 
 def toSelectList(names:list[str]) -> list[discord.SelectOption]: return [discord.SelectOption(label=name) for name in names]
 class NormalCog(commands.Cog):
