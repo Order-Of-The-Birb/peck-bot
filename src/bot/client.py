@@ -2,6 +2,7 @@ import logging
 from datetime import UTC, datetime
 from importlib import reload
 from sys import modules as sysmodules
+from typing import TypedDict
 
 import discord
 from discord.ext import commands
@@ -84,10 +85,15 @@ class _Bot(commands.Bot):
 			logger.exception("An error occured while syncing")
 		logger.info("Startup complete")
 
+class _InteractionExtras(TypedDict):
+	config: Config.GuildConfig | None
+class Interaction(discord.Interaction):
+	extras: _InteractionExtras
+
 #region Decorators
 def guild_config():
 	async def predicate(interaction: discord.Interaction) -> bool:
-		config =await Config.get(interaction.guild_id)
+		config = await Config.get(interaction.guild_id)
 		if config is None:
 			return True
 		interaction.extras["config"] = config
@@ -95,12 +101,15 @@ def guild_config():
 	return discord.app_commands.check(predicate)
 def guild_only():
 	async def predicate(interaction: discord.Interaction) -> bool:
-		config =await Config.get(interaction.guild_id)
+		config = await Config.get(interaction.guild_id)
 		if config is None:
+			await interaction.response.send_message("This server is not configured")
 			return False
 		interaction.extras["config"] = config
 		return True
-	return discord.app_commands.check(predicate)
+	def decorator(func):
+		return discord.app_commands.check(predicate)(discord.app_commands.guild_only()(func))
+	return decorator
 
 def debug_only():
 	return discord.app_commands.check(lambda x: paths.DEBUG)

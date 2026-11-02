@@ -5,7 +5,9 @@ from enum import Enum, StrEnum
 from json import loads as load_json
 from os import getenv
 from random import choice
-from typing import Literal, overload
+from typing import Literal, overload, Annotated
+from typing_extensions import Doc
+from urllib.parse import quote_plus
 
 import discord
 from aiohttp import ClientResponseError
@@ -96,16 +98,6 @@ class GuildConfig:
 					obj["sqb_part"]
 				)
 
-			@staticmethod
-			async def list_users(page:int = 1) -> tuple["GuildConfig._Management.Entry", ...]:
-				if page < 1:
-					raise ValueError("Page value must be above 0")
-				async with Network.get(f"{_MANAGEMENT_URL}/api/v1/users?page={page}&per_page=50") as r:
-					data = (await r.json())["data"]
-				for i, user in enumerate(data):
-					data[i] = GuildConfig._Management.Entry.from_dict(user)
-				return tuple(data)
-
 			async def context(self) -> tuple["ContextModels.AbsenceOnce | ContextModels.AbsenceRecurring | ContextModels.Miscellaneous", ...]:
 				async with Network.get(f"{_MANAGEMENT_URL}/api/v1/users/{self.gaijin_id}/context") as r:
 					data: list[dict[str, int|str|list[str]]] = await r.json()
@@ -169,6 +161,56 @@ class GuildConfig:
 				if not data:
 					return
 				return self.Entry.from_dict(data)
+
+
+		class SortFields(Enum):
+			NAME = "username"
+			GAIJIN = "gaijin_id"
+			STATUS = "status"
+			DISCORD = "discord_id"
+			TZ = "tz"
+			SQB = "sqb_part"
+		async def query(
+			self,
+			page:int = 1,
+			/, *,
+			per_page: int = 50,
+			search: Annotated[int | str | None, Doc("Search for a specific user")] = None,
+			status: Annotated[Entry.Status | None, Doc("Filter by a specific status\nString searches by username, int searches both Gaijin and Discord IDs")] = None,
+			tz: Annotated[int | None, Doc("Filter by a specific timezone")] = None,
+			sort_direction: Literal["asc", "desc"] = "asc",
+			sort_by: SortFields | None = None
+		) -> tuple["GuildConfig._Management.Entry", ...]:
+			if page < 1:
+				raise ValueError("Page value must be above 0")
+			if not 1 <= per_page <= 100:
+				raise ValueError("per_page must be between 1 and 100")
+			if tz is not None and not -11 <= tz <= 12:
+				raise ValueError(f"timezone value '{tz}' is invalid")
+			if sort_direction not in ["asc", "desc"]:
+				raise ValueError(f"Invalid sort direction '{sort_direction}' given")
+
+			queries = {
+				"page": page,
+				"per_page": per_page
+			}
+			if sort_by is not None:
+				queries["sort_direction"] = sort_direction
+				queries["sort_by"] = sort_by.value
+			if tz is not None:
+				queries["tz"] = tz
+			if search is not None:
+				queries["search"] = search
+			if status is not None:
+				queries["status"] = status.value
+
+			link = f"{_MANAGEMENT_URL}/api/v1/users?{"&".join(f"{k}={quote_plus(str(v))}" for k, v in queries.items())}"
+
+			async with Network.get(link) as r:
+				data = (await r.json())["data"]
+			for i, user in enumerate(data):
+				data[i] = GuildConfig._Management.Entry.from_dict(user)
+			return tuple(data)
 
 	__ID: int
 	__CHANNELS: dict[Channels, int]
@@ -294,8 +336,8 @@ class GuildConfig:
 
 __CACHE: dict[int, GuildConfig] = {}
 
-async def get(guild_id: int | discord.Interaction) -> GuildConfig | None:
-	if isinstance(guild_id, discord.Interaction):
+async def get(guild_id: int | Client.Interaction) -> GuildConfig | None:
+	if isinstance(guild_id, Client.Interaction):
 		guild_id = guild_id.guild_id
 	if guild_id in __CACHE:
 		return __CACHE[guild_id]

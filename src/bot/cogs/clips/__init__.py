@@ -21,17 +21,17 @@ class ClipsCog(commands.GroupCog, group_name="clips"):
 		self.logger.debug(f"{self.__class__.__name__} initialized")
 
 	@discord.app_commands.command(name="upload")
-	async def upload_clip(self, interaction:discord.Interaction):
+	async def upload_clip(self, interaction:Client.Interaction):
 		await interaction.response.send_modal(Modals.CreateClip())
 
 	@discord.app_commands.command(name="add_alias")
-	async def add_alias(self, interaction:discord.Interaction):
+	async def add_alias(self, interaction:Client.Interaction):
 		await interaction.response.send_modal(Modals.CreateAlias())
 
 	@discord.app_commands.command(name="remove_alias")
 	@discord.app_commands.default_permissions(manage_channels=True)
 	@Client.admin_only()
-	async def remove_alias(self, interaction:discord.Interaction, alias:str, user:discord.User):
+	async def remove_alias(self, interaction:Client.Interaction, alias:str, user:discord.User):
 		await interaction.response.defer(thinking=True, ephemeral=True)
 
 		config =await Config.get(interaction.guild.id)

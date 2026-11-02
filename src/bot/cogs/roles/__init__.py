@@ -20,19 +20,19 @@ class RolesCog(commands.GroupCog, group_name="role"):
 		self.logger = logging.getLogger(__name__)
 		self.logger.debug(f"{self.__class__.__name__} initialized")
 
-	async def interaction_check(self, interaction: discord.Interaction):
+	async def interaction_check(self, interaction: Client.Interaction):
 		if isinstance(interaction.channel, discord.DMChannel):
 			await interaction.response.send_message("This command can only be run in servers.")
 			return False
 		return True
 
 	@discord.app_commands.command(name="get")
-	@discord.app_commands.guild_only()
+	@Client.guild_only()
 	@discord.app_commands.choices(role=[
 		discord.app_commands.Choice(name="sqb ping",value=1),
 		discord.app_commands.Choice(name="old timer",value=2)
 	])
-	async def get_role(self, interaction:discord.Interaction, role:int):
+	async def get_role(self, interaction:Client.Interaction, role:int):
 		await interaction.response.defer(thinking=True)
 		config =await Config.get(interaction.guild_id)
 		if config is None:
@@ -74,19 +74,14 @@ class RolesCog(commands.GroupCog, group_name="role"):
 				await tmp.send(embed=embed)
 
 	@discord.app_commands.command(name="remove")
-	@discord.app_commands.guild_only()
+	@Client.guild_only()
 	@discord.app_commands.choices(role=[
 		discord.app_commands.Choice(name="sqb ping", value=1)
 	])
-	async def rm_role(self, interaction:discord.Interaction, role:int):
+	async def rm_role(self, interaction:Client.Interaction, role:int):
 		await interaction.response.defer(thinking=True, ephemeral=True)
-		config =await Config.get(interaction.guild_id)
-		if config is None:
-			await interaction.edit_original_response(content="This server is not yet configured")
-			return
-
 		if role == 1:
-			pingrole = config.get(Config.Roles.PING)
+			pingrole = interaction.extras["config"].get(Config.Roles.PING)
 			if pingrole not in interaction.user.roles:
 				await interaction.edit_original_response(content="You don't have the role. If you wish to get it use the `/role get` command!")
 				return

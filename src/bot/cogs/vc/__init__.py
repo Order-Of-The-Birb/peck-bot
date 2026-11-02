@@ -63,7 +63,7 @@ class VcCog(commands.GroupCog, group_name="squad"):
 		self.voice_channels = {}
 
 	@discord.app_commands.command(name="create")
-	@discord.app_commands.guild_only()
+	@Client.guild_only()
 	@discord.app_commands.choices(size=[
 		discord.app_commands.Choice(name="4 users", value=4),
 		discord.app_commands.Choice(name="8 users", value=8),
@@ -71,7 +71,7 @@ class VcCog(commands.GroupCog, group_name="squad"):
 		discord.app_commands.Choice(name="No limit", value=-1)
 	])
 	@discord.app_commands.checks.cooldown(1, 30*60)
-	async def create_vc(self, interaction:discord.Interaction, size:int, private:bool = False):
+	async def create_vc(self, interaction:Client.Interaction, size:int, private:bool = False):
 		"""Creates a new squad VC with a set size (4,8 or 10). Will not create one if you already have one active."""
 		await interaction.response.defer(thinking=True)
 		config = await Config.get(interaction)

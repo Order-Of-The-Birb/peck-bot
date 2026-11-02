@@ -63,7 +63,7 @@ class Modals:
 			def __init__(self):
 				super().__init__(timeout=600)
 
-			async def on_submit(self, interaction: discord.Interaction):
+			async def on_submit(self, interaction: Client.Interaction):
 				self.stop()
 				await interaction.response.defer(thinking=True, ephemeral=True)
 
@@ -121,7 +121,7 @@ class Modals:
 			def __init__(self):
 				super().__init__(timeout=600)
 
-			async def on_submit(self, interaction:discord.Interaction):
+			async def on_submit(self, interaction:Client.Interaction):
 				await interaction.response.defer(ephemeral=True, thinking=True)
 
 				config =await Config.get(interaction.guild_id)
@@ -167,7 +167,7 @@ class Modals:
 		)
 		def __init__(self):
 			super().__init__(timeout=15 * 60)
-		async def on_submit(self, interaction:discord.Interaction):
+		async def on_submit(self, interaction:Client.Interaction):
 			await interaction.response.defer(ephemeral=True, thinking=True)
 
 			config =await Config.get(interaction.guild_id)
@@ -244,7 +244,7 @@ class Modals:
 		)
 		def __init__(self):
 			super().__init__(timeout=15 * 60)
-		async def on_submit(self, interaction: discord.Interaction):
+		async def on_submit(self, interaction: Client.Interaction):
 			#raise NotImplementedError("Currently rebuilding this code")
 			await interaction.response.defer(thinking=True, ephemeral=True)
 
@@ -292,7 +292,7 @@ class Modals:
 			_logger.debug(f"Report from {interaction.user.name} ({interaction.user.id})\nWT username: {username}\nReport message: {report_msg}")
 			await config.get(Config.Channels.LOGS).send(embed=embed)
 			await interaction.edit_original_response(content="Report submitted!")
-		async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
+		async def on_error(self, interaction: Client.Interaction, error: Exception) -> None:
 			await interaction.edit_original_response(content='Oops! Something went wrong.')
 			_logger.exception("An error occured while reporting", exc_info=error)
 
@@ -301,7 +301,7 @@ class Views:
 		class _callbackProtocol(Protocol):
 			async def __call__(
 				self,
-				interaction: discord.Interaction,
+				interaction: Client.Interaction,
 				**kwargs
 			) -> bool|None: ...
 		def __init__(self, *, acceptFunc:_callbackProtocol, denyFunc:_callbackProtocol|None=None, timeout:int|None = 180, acceptLabel:str = "Yes", denyLabel:str="No", deny:bool=True, removeButtonsAfter:bool=False, requiredPerms:discord.Permissions|None=None, id: str | None = None, **kwargs):
@@ -319,7 +319,7 @@ class Views:
 				style=discord.ButtonStyle.red,
 				custom_id="deny"
 			)
-			async def yes_callback(interaction: discord.Interaction):
+			async def yes_callback(interaction: Client.Interaction):
 				await interaction.response.edit_message(view=self)
 				if self.requiredPerms is not None and not all(getattr(interaction.user.guild_permissions, p[0], False) for p in self.requiredPerms if p[1]):
 					_logger.warning(f"Accept attempt by: {interaction.user.name} ({interaction.user.id})")
@@ -336,7 +336,7 @@ class Views:
 							await interaction.edit_original_response(view=None)
 						except discord.NotFound:
 							pass # The callback may already have deleted the message.
-			async def no_callback(interaction: discord.Interaction):
+			async def no_callback(interaction: Client.Interaction):
 				await interaction.response.edit_message(view=self)
 				if self.requiredPerms is not None and not all(getattr(interaction.user.guild_permissions, p[0], False) for p in self.requiredPerms if p[1]):
 					_logger.warning(f"Deny attempt by: {interaction.user.name} ({interaction.user.id})")

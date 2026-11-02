@@ -15,7 +15,7 @@ class AdminCog(commands.Cog):
 	def __init__(self):
 		self.logger = logging.getLogger(__name__)
 		self.logger.debug(f"{self.__class__.__name__} initialized")
-	async def interaction_check(self, interaction:discord.Interaction):
+	async def interaction_check(self, interaction:Client.Interaction):
 		if isinstance(interaction.channel, discord.DMChannel):
 			self.logger.warning(f"Unauthorized request\n\tCommand:{interaction.command.name}\t\nUser:{interaction.user.name}({interaction.user.id})\n\tReason: Admin command in DMs")
 			await interaction.response.send_message("You need to execute this command in a server (Required to check for permissions)")
@@ -26,11 +26,11 @@ class AdminCog(commands.Cog):
 		return False
 
 	@discord.app_commands.command()
-	@discord.app_commands.guild_only()
+	@Client.guild_only()
 	@discord.app_commands.default_permissions(manage_messages=True)
 	@discord.app_commands.checks.has_permissions(manage_messages=True)
 	@discord.app_commands.describe(count="The amount of messages to purge")
-	async def purge(self, interaction:discord.Interaction, count:int):
+	async def purge(self, interaction:Client.Interaction, count:int):
 		if count < 1:
 			await interaction.response.send_message(content="Count too low.", ephemeral=True)
 			return
@@ -39,11 +39,11 @@ class AdminCog(commands.Cog):
 		await interaction.edit_original_response(content="Messages purged.")
 
 	@discord.app_commands.command()
-	@discord.app_commands.guild_only()
+	@Client.guild_only()
 	@discord.app_commands.default_permissions(administrator=True)
 	@discord.app_commands.checks.has_permissions(administrator=True)
 	@discord.app_commands.describe(userid="The user's id to send the DM to", content="What will be sent")
-	async def senddm(self, interaction: discord.Interaction, userid:str, content:str):
+	async def senddm(self, interaction: Client.Interaction, userid:str, content:str):
 		"""Sends a DM to a specified user, used with an ID, Only usable by the bot owner"""
 		userid = int(userid)
 		user = await Client.BOT.fetch_user(userid)
@@ -51,10 +51,10 @@ class AdminCog(commands.Cog):
 		await interaction.response.send_message(f"{user} has recieved your message")
 
 	@discord.app_commands.command()
-	@discord.app_commands.guild_only()
+	@Client.guild_only()
 	@discord.app_commands.default_permissions(administrator=True)
 	@discord.app_commands.checks.has_permissions(administrator=True)
-	async def say(self, interaction:discord.Interaction, content:str, file:discord.Attachment | None = None, respond_to_id:str | None = None):
+	async def say(self, interaction:Client.Interaction, content:str, file:discord.Attachment | None = None, respond_to_id:str | None = None):
 		"""Says the content as the bot, Only usable as the owner of the bot"""
 		await interaction.response.defer(ephemeral=True)
 		if "-" in respond_to_id: # copy message ID returns <channelID>-<messageID> when holding shift
@@ -71,7 +71,7 @@ class AdminCog(commands.Cog):
 		await interaction.delete_original_response()
 
 	@discord.app_commands.command()
-	@discord.app_commands.guild_only()
+	@Client.guild_only()
 	@discord.app_commands.default_permissions(ban_members=True)
 	@discord.app_commands.checks.has_permissions(ban_members=True)
 	@discord.app_commands.choices(
@@ -92,7 +92,7 @@ class AdminCog(commands.Cog):
 			discord.app_commands.Choice(name="7d", value=7*24*60*60),
 		]
 	)
-	async def softban(self, interaction:discord.Interaction, user:discord.Member, reason:str, delete_messages:int):
+	async def softban(self, interaction:Client.Interaction, user:discord.Member, reason:str, delete_messages:int):
 		await interaction.response.defer(thinking=True, ephemeral=True)
 		if delete_messages > 24*60*60:
 			await user.ban(delete_message_days=delete_messages//24//60//60, reason=reason)

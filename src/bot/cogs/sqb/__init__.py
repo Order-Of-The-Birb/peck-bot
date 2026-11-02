@@ -24,7 +24,7 @@ class SQBCog(commands.GroupCog, group_name="sqb"):
 		self.logger = logging.getLogger(__name__)
 		self.logger.debug(f"{self.__class__.__name__} initialized")
 
-	async def interaction_check(self, interaction: discord.Interaction):
+	async def interaction_check(self, interaction: Client.Interaction):
 		if isinstance(interaction.channel, discord.DMChannel):
 			await interaction.response.send_message("This command can only be run in servers.")
 			return False
@@ -40,10 +40,10 @@ class SQBCog(commands.GroupCog, group_name="sqb"):
 	asked_users: dict[int, dict[int, datetime]] # guild: {userid: asked_at}
 	@discord.app_commands.command(name="recruit")
 	@Client.admin_only()
-	@discord.app_commands.guild_only()
+	@Client.guild_only()
 	@discord.app_commands.default_permissions(manage_channels=True)
 	@discord.app_commands.describe(username="Enter War Thunder username, who the message gets sent to",dc_user="Ping a user to send a message to")
-	async def sqbrecruit(self, interaction: discord.Interaction, username:str|None=None, dc_user:discord.Member|None=None):
+	async def sqbrecruit(self, interaction: Client.Interaction, username:str|None=None, dc_user:discord.Member|None=None):
 		"""Recruits a given person for SQB"""
 		await interaction.response.defer(thinking=True)
 		self.asked_users = {k:{key:value for key, value in v.items() if value < (datetime.now(UTC) - timedelta(minutes=30))} for k, v in self.asked_users.items()}
@@ -80,11 +80,11 @@ class SQBCog(commands.GroupCog, group_name="sqb"):
 		current_br = await ThunderAPI.clan.current_bracket()
 		message = f"Hello {user.username}!\nYou have been drafted for SQB.\nThe current BR is {current_br.bracket.br}\n{await config.random_propaganda()}"
 		dc_user2 = Client.BOT.get_user(user.discord_id)
-		async def accept(interaction2:discord.Interaction):
+		async def accept(interaction2:Client.Interaction):
 			await interaction2.followup.send(f"Splendid, please join <#{config.get(Config.Channels.SQB)}> to start participating!")
 			await interaction.followup.send(content=f"User '{interaction2.user.name}' has accepted participating.")
 			return True
-		async def deny(interaction2:discord.Interaction):
+		async def deny(interaction2:Client.Interaction):
 			await interaction2.followup.send("Understood.")
 			await interaction.followup.send(content=f"User '{interaction2.user.name}' has denied participating this time.")
 			self.asked_users.setdefault(interaction.guild_id, {})
@@ -97,8 +97,8 @@ class SQBCog(commands.GroupCog, group_name="sqb"):
 			await interaction.edit_original_response(content=f"Could not send DM to {dc_user2.name} (War Thunder username: {user.username}).")
 
 	@discord.app_commands.command(name="brackets")
-	@discord.app_commands.guild_only()
-	async def sqb_brackets(self, interaction:discord.Interaction, pin:bool=False):
+	@Client.guild_only()
+	async def sqb_brackets(self, interaction:Client.Interaction, pin:bool=False):
 		"""Posts the seasonal schedule for SQB"""
 		await interaction.response.defer(thinking=True)
 		if interaction.user.guild_permissions.pin_messages and pin:
@@ -124,7 +124,7 @@ class SQBCog(commands.GroupCog, group_name="sqb"):
 			await interaction.followup.send("You don't have permissions to pin messages, therefore the message wasn't pinned.", ephemeral=True)
 
 	@discord.app_commands.command(name="current_br")
-	async def current_br(self, interaction:discord.Interaction):
+	async def current_br(self, interaction:Client.Interaction):
 		"""Posts the current active BR"""
 		await interaction.response.defer(thinking=True, ephemeral=True)
 		bracket = await ThunderAPI.clan.current_bracket()
