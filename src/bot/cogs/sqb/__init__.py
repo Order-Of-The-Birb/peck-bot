@@ -9,13 +9,7 @@ import bot.client as Client
 import bot.config as Config
 import utils.thunderapi as ThunderAPI
 import utils.time as timeUtil
-from bot.views import Views
 
-# "utils.generic", "utils.media",
-# "utils.memory", "utils.network", "utils.newsAPI",
-# "utils.resources", "utils.thunderapi", "utils.time"
-# "bot.views", "bot.client", "bot.config"
-__reload_deps__ = ("bot.client", "bot.config", "bot.views", "utils.time", "utils.thunderapi")
 
 class SQBCog(commands.GroupCog, group_name="sqb"):
 	posting_task: asyncio.Task
@@ -91,7 +85,7 @@ class SQBCog(commands.GroupCog, group_name="sqb"):
 			self.asked_users[interaction.guild_id][interaction2.user.id] = datetime.now(UTC)
 			return True
 		try:
-			await dc_user2.send(message, view=Views.genericButtons(acceptFunc=accept, denyFunc=deny, acceptLabel="Accept Invitation", denyLabel="Deny Invitation", removeButtonsAfter=True))
+			await dc_user2.send(message, view=Client.genericButtons(acceptFunc=accept, denyFunc=deny, acceptLabel="Accept Invitation", denyLabel="Deny Invitation", removeButtonsAfter=True))
 			await interaction.edit_original_response(content=f"Message sent to {dc_user2.name} (War Thunder username: {user.username})")
 		except discord.Forbidden:
 			await interaction.edit_original_response(content=f"Could not send DM to {dc_user2.name} (War Thunder username: {user.username}).")

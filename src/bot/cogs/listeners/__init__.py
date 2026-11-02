@@ -9,16 +9,9 @@ from discord.ext import commands
 import bot.client as Client
 import bot.config as Config
 import paths as Paths
-import utils.helper as genericUtil
 import utils.helper as helperUtil
 import utils.newsAPI as NewsAPI
 import utils.time as timeUtil
-
-# "utils.generic", "utils.media",
-# "utils.memory", "utils.network", "utils.newsAPI",
-# "utils.resources", "utils.thunderapi", "utils.time"
-# "bot.views", "bot.client", "bot.config"
-__reload_deps__ = ("bot.client", "bot.config", "utils.generic", "utils.time",  "utils.newsAPI")
 
 sqb_member_last_seen = datetime.now(UTC)-timedelta(minutes=30)
 
@@ -87,7 +80,7 @@ class Listeners(commands.Cog):
 			embed = discord.Embed(title="User left", description="A Squadron member left the server!", color=0xb7a287)
 			embed.add_field(name="Discord name", value=f"{member.name}", inline=False)
 			embed.add_field(name="UID", value=f"{member.id}", inline=False)
-			embed.add_field(name="WT username", value=f"{genericUtil.demarkdownify(user[0].username)}", inline=False)
+			embed.add_field(name="WT username", value=f"{helperUtil.demarkdownify(user[0].username)}", inline=False)
 			embed.add_field(name="Length of stay", value=f"{member.joined_at.strftime("%Y.%m.%d")}-{datetime.now(UTC).strftime("%Y.%m.%d")}")
 			await logs_channel.send(embed=embed)
 

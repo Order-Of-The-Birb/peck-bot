@@ -2,10 +2,10 @@ import asyncio
 
 import discord
 
+import bot.client as Client
 import bot.config as Config
 import utils.helper as helperUtil
 
-__reload_deps__ = ("bot.config","utils.helper")
 
 async def setup_channel(channel: discord.ForumChannel, user: discord.Member):
 	voting_thread, user_thread = await helperUtil.get_clip_threads(channel, user.id)

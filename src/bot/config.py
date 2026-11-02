@@ -5,12 +5,12 @@ from enum import Enum, StrEnum
 from json import loads as load_json
 from os import getenv
 from random import choice
-from typing import Literal, overload, Annotated
-from typing_extensions import Doc
+from typing import Annotated, Literal, overload
 from urllib.parse import quote_plus
 
 import discord
 from aiohttp import ClientResponseError
+from typing_extensions import Doc
 
 import bot.client as Client
 import utils.network as Network

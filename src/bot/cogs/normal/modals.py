@@ -3,13 +3,11 @@ import re
 
 import discord
 
-import bot.config as Config
 import bot.client as Client
+import bot.config as Config
 import utils.thunderapi as ThunderAPI
 
 _logger = logging.getLogger(__name__)
-
-__reload_deps__ = ("bot.config", "utils.thunderapi")
 
 class ReportModal(discord.ui.Modal, title="Report user"):
 	user = discord.ui.Label(

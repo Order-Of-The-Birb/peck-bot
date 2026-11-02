@@ -9,11 +9,6 @@ import bot.config as Config
 
 from . import modals as Modals
 
-# "utils.generic", "utils.media",
-# "utils.memory", "utils.network", "utils.newsAPI",
-# "utils.resources", "utils.thunderapi", "utils.time"
-# "bot.views", "bot.client", "bot.config"
-__reload_deps__ = ("bot.client", "bot.config")
 
 class ClipsCog(commands.GroupCog, group_name="clips"):
 	def __init__(self):

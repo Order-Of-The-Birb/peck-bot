@@ -10,20 +10,14 @@ from psutil._common import bytes2human
 
 import bot.client as Client
 import bot.config as Config
-import utils.helper as genericUtil
+import utils.helper as helperUtil
 import utils.media as Media
 import utils.thunderapi as ThunderAPI
 import utils.time as timeUtil
 
 from . import modals as Modals
 
-# "utils.generic", "utils.helper", "utils.media",
-# "utils.memory", "utils.network", "utils.newsAPI",
-# "utils.resources", "utils.thunderapi", "utils.time"
-# "bot.views", "bot.client", "bot.config"
-__reload_deps__ = ("bot.client", "bot.config", "utils.generic", "utils.time", "utils.thunderapi", "utils.media", "bot.cogs.normal.modals")
 
-def toSelectList(names:list[str]) -> list[discord.SelectOption]: return [discord.SelectOption(label=name) for name in names]
 class NormalCog(commands.Cog):
 	def __init__(self):
 		self.logger = logging.getLogger(__name__)
@@ -95,7 +89,7 @@ class NormalCog(commands.Cog):
 
 		top_10_message = f"Top {len(topmembers)} Users:\n"
 		for i, user in enumerate(topmembers, 1):
-			top_10_message += f"{i}. {genericUtil.demarkdownify(user.name)}: {user.sqb_rating}\n"
+			top_10_message += f"{i}. {helperUtil.demarkdownify(user.name)}: {user.sqb_rating}\n"
 		await interaction.edit_original_response(content=top_10_message)
 
 	# region Download Commands
