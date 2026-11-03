@@ -16,6 +16,16 @@ class SQBCog(commands.GroupCog, group_name="sqb"):
 	posting_task: asyncio.Task
 	def __init__(self):
 		self.asked_users = {}
+		self.context_items = (
+			discord.app_commands.ContextMenu(
+				name="Get War Thunder username",
+				callback=self.get_wt_name
+			),
+			discord.app_commands.ContextMenu(
+				name="Recruit for SQB",
+				callback=self.recruit
+			)
+		)
 		self.logger = logging.getLogger(__name__)
 		self.logger.debug(f"{self.__class__.__name__} initialized")
 
@@ -32,6 +42,7 @@ class SQBCog(commands.GroupCog, group_name="sqb"):
 		member_role = config.get(Config.Roles.MEMBER)
 		return member_role in interaction.user.roles
 
+	#region Commands
 	asked_users: dict[int, dict[int, datetime]] # guild: {userid: asked_at}
 	@discord.app_commands.command(name="recruit")
 	@Client.admin_only()
@@ -126,8 +137,15 @@ class SQBCog(commands.GroupCog, group_name="sqb"):
 		if not bracket:
 			await interaction.edit_original_response(content="Could not get current BR data. Please try again later.")
 			return
-		await interaction.edit_original_response(content=f"Current BR:\n# {bracket.bracket.br:.1f}\nCurrent bracket started {timeUtil.discord_timestamp(bracket.bracket.start, timeUtil.timestampTypes.RELATIVE)} and ends {timeUtil.discord_timestamp(bracket.bracket.end, timeUtil.timestampTypes.RELATIVE)}")
+		if bracket.start <= datetime.now(UTC):
+			await interaction.edit_original_response(content=f"Current BR:\n# {bracket.bracket.br:.1f}\nCurrent bracket started {timeUtil.discord_timestamp(bracket.bracket.start, timeUtil.timestampTypes.RELATIVE)} and ends {timeUtil.discord_timestamp(bracket.bracket.end, timeUtil.timestampTypes.RELATIVE)}")
+		else:
+			await interaction.edit_original_response(content=f"Next BR:\n# {bracket.bracket.br:.1f}\nBracket starts {timeUtil.discord_timestamp(bracket.bracket.start, timeUtil.timestampTypes.RELATIVE)} and ends {timeUtil.discord_timestamp(bracket.bracket.end, timeUtil.timestampTypes.RELATIVE)}")
 
+	@discord.app_commands.command(name="analyze")
+	async def analyze_replay(self, interaction: ext.Interaction, url: str):
+		pass # TODO: Implement SQB replay analyzing
+	#endregion
 	#region Tasks
 	@tasks.loop(
 		time=(
@@ -156,13 +174,87 @@ class SQBCog(commands.GroupCog, group_name="sqb"):
 				continue
 			await ch.send(embed=embed)
 
-	async def cog_load(self):
-		self.posting_task = self.sqb_post.start()
-		return await super().cog_load()
-	async def cog_unload(self):
-		self.posting_task.cancel()
-		return await super().cog_unload()
 	#endregion
+	#region Context Menu
+	@Client.guild_only()
+	async def get_wt_name(self, interaction:ext.Interaction, user:discord.Member):
+		await interaction.response.defer(ephemeral=True, thinking=True)
+		config = await Config.get(interaction.guild_id)
+		if config is None:
+			await interaction.response.send_message("This server is not configured.", ephemeral=True)
+			return
+		associatedAccounts = await config.management.get(discord_id=user.id)
+		if not associatedAccounts:
+			await interaction.response.send_message("Could not find any accounts associated with the user.", ephemeral=True)
+			return
+		accounts_string = "\n".join(f'- {i.username}' for i in associatedAccounts)
+		await interaction.edit_original_response(content=f"The following accounts are connected to the user:\n{accounts_string}")
+
+	@Client.guild_only()
+	async def recruit(self, interaction: ext.Interaction, user: discord.Member):
+		"""Recruits person for SQB"""
+		await interaction.response.defer(thinking=True)
+		current_br = await ThunderAPI.clan.current_bracket()
+
+		if current_br.start > datetime.now(UTC):
+			await interaction.edit_original_response(content="There is no currently active bracket. Try again later.")
+			return
+
+		self.asked_users = {k:{key:value for key, value in v.items() if value < (datetime.now(UTC) - timedelta(minutes=30))} for k, v in self.asked_users.items()}
+		if interaction.user.id in self.asked_users.get(interaction.guild_id, {}):
+			await interaction.edit_original_response(content="This user recently rejected recruitment. No message was sent.")
+
+		config =await Config.get(interaction.guild_id)
+		if config is None:
+			await interaction.edit_original_response(content="This server is not configured.")
+			return
+		management = config.management
+		if management is None:
+			await interaction.edit_original_response(content="This server's management token is not yet configured.")
+			return
+
+		account = await management.query(1, search=user.id, sort_by=management.SortFields.JOINDATE, status=management.Entry.Status.MEMBER)
+		account = account[0] if account else None
+
+		if account is None:
+			await interaction.edit_original_response(content="This user doesn't have any account associated")
+			return
+
+		message = f"Hello {account.username}!\nYou have been drafted for SQB.\nThe current BR is {current_br.bracket.br}\n{await config.random_propaganda()}"
+		async def accept(interaction2:ext.Interaction):
+			await interaction2.followup.send(f"Splendid, please join <#{config.get(Config.Channels.SQB)}> to start participating!")
+			await interaction.edit_original_response(content=f"User '{interaction2.user.name}' has accepted participating.")
+			return True
+		async def deny(interaction2:ext.Interaction):
+			await interaction2.followup.send("Understood.")
+			await interaction.edit_original_response(content=f"User '{interaction2.user.name}' has denied participating this time.")
+			self.asked_users.setdefault(interaction.guild_id, {})
+			self.asked_users[interaction.guild_id][interaction2.user.id] = datetime.now(UTC)
+			return True
+		try:
+			await user.send(
+				message,
+				view=Client.genericButtons(
+					timeout=(datetime.now(UTC) - current_br.end).total_seconds(),
+					acceptFunc=accept,
+					denyFunc=deny,
+					acceptLabel="Accept Invitation",
+					denyLabel="Deny Invitation",
+					removeButtonsAfter=True
+				)
+			)
+			await interaction.edit_original_response(content=f"Message sent to {user.name} (War Thunder username: {account.username})")
+		except discord.Forbidden:
+			await interaction.edit_original_response(content=f"Could not send DM to {user.name} (War Thunder username: {account.username}).")
+	#endregion
+	async def cog_load(self):
+		for item in self.context_items:
+			Client.BOT.tree.add_command(item)
+		self.posting_task = self.sqb_post.start()
+	async def cog_unload(self):
+		for item in self.context_items:
+			Client.BOT.tree.remove_command(item.name, type=item.type)
+		self.posting_task.cancel()
 
 async def setup(bot: Client._Bot):
 	await bot.add_cog(SQBCog())

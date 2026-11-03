@@ -11,9 +11,7 @@ from psutil._common import bytes2human
 import bot.client as Client
 import bot.config as Config
 import bot.extensions as ext
-import utils.helper as helperUtil
 import utils.media as Media
-import utils.thunderapi as ThunderAPI
 import utils.time as timeUtil
 
 from . import modals as Modals
@@ -69,30 +67,6 @@ class NormalCog(commands.Cog):
 			msg_content += f"-# This amount can be bought by purchasing {value//75000}x 75000 GE and then {value%75000} GE separately"
 		await interaction.response.send_message(msg_content)
 
-	@discord.app_commands.command()
-	async def top_members(self, interaction: ext.Interaction, number:int=8):
-		"""Requests the top `number` highest SQB Activity people from the squadron"""
-		await interaction.response.defer(thinking=True)
-		config =await Config.get(interaction.guild_id)
-		if config is None:
-			await interaction.edit_original_response(content="This server wasn't configured.")
-			return
-
-		topmembers = await ThunderAPI.clan.get(config.squadron)
-		if topmembers is None:
-			await interaction.edit_original_response(content="There seems to be no such squadron")
-			return
-		if len(topmembers) == 0:
-			await interaction.edit_original_response(content="There seems to be nobody in the squadron with any SQB points.")
-			return
-		if len(topmembers) > number:
-			topmembers = topmembers[:number]
-
-		top_10_message = f"Top {len(topmembers)} Users:\n"
-		for i, user in enumerate(topmembers, 1):
-			top_10_message += f"{i}. {helperUtil.demarkdownify(user.name)}: {user.sqb_rating}\n"
-		await interaction.edit_original_response(content=top_10_message)
-
 	# region Download Commands
 	group_download = discord.app_commands.Group(name="download", description="Commands for downloading media from providers")
 
@@ -112,9 +86,7 @@ class NormalCog(commands.Cog):
 		await interaction.followup.send("Here you go.", file=clip)
 	# endregion
 	# region Request Commands
-	group_requests = discord.app_commands.Group(name="request", description="For requesting user data from our database")
-
-	@group_requests.command(name="warthunder")
+	@discord.app_commands.command(name="request_user")
 	@discord.app_commands.describe(user="The user to search for")
 	async def request_wt(self, interaction: ext.Interaction, user:discord.Member):
 		"""Requests a user's War Thunder username(s) from the database"""
@@ -132,27 +104,6 @@ class NormalCog(commands.Cog):
 			await interaction.edit_original_response(content="User not found")
 			return
 		await interaction.edit_original_response(content=f"Account(s) found: \n{"\n".join(f"- {i.username}" for i in db_user)}")
-
-	@group_requests.command(name="discord")
-	@discord.app_commands.describe(user="The War Thunder username to search for")
-	async def request_dc(self, interaction: ext.Interaction, user:str):
-		"""Requests a user's ID based on the WT username in the database"""
-		await interaction.response.defer(thinking=True, ephemeral=True)
-		config = await Config.get(interaction)
-		if config is None:
-			await interaction.edit_original_response(content="This server is not yet configured.")
-			return
-		management = config.management
-		if management is None:
-			await interaction.edit_original_response(content="This server's management token is not yet configured.")
-			return
-
-		if (db_users := await management.get(username=user)) is not None:
-			await interaction.edit_original_response(
-				content=f"User(s) found:\n{"\n".join(f"- {i.mention}" for j in db_users if (i := interaction.guild.get_member(j.discord_id)) is not None)}"
-			)
-		else:
-			await interaction.edit_original_response(content="User not found")
 	# endregion
 
 	@discord.app_commands.command()

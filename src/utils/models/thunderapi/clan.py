@@ -62,8 +62,8 @@ class SQBTimeBracket(BaseModel):
 
 class CurrentSQBBracket(BaseModel):
 	bracket: SQBTimeBracket
-	start: datetime | None = None
-	end: datetime | None = None
+	start: datetime
+	end: datetime
 
 class ClanLeaderboardModel(BaseModel):
 	class ClanStatsModel(BaseModel):

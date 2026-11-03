@@ -1,6 +1,7 @@
 from asyncio import Event, Lock
+from logging import getLogger
 
-from aiohttp import ClientSession
+from aiohttp import ClientResponseError, ClientSession
 from aiohttp.cookiejar import DummyCookieJar
 from fastapi import HTTPException
 from fastapi.concurrency import asynccontextmanager
@@ -15,6 +16,7 @@ _active_ops = 0
 _active_ops_done = Event()
 _active_ops_done.set()
 _lock = Lock()
+_logger = getLogger(__name__)
 
 @asynccontextmanager
 async def post(url:str, **kwargs):
@@ -26,9 +28,12 @@ async def get(url:str, **kwargs):
 		yield resp
 @asynccontextmanager
 async def request(method:str, url:str, **kwargs):
-	async with operation() as session, session.request(method, url, **kwargs) as resp:
-		resp.raise_for_status()
-		yield resp
+	try:
+		async with operation() as session, session.request(method, url, **kwargs) as resp:
+			resp.raise_for_status()
+			yield resp
+	except ClientResponseError:
+		_logger.exception(f"Failed to connect to URL '{url}'")
 
 @asynccontextmanager
 async def operation():

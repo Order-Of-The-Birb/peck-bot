@@ -124,14 +124,12 @@ class VcCog(commands.GroupCog, group_name="squad"):
 					await self.voice_channels[dc_guild.id].add(channel)
 				continue
 			await self.voice_channels[dc_guild.id].update()
+	#endregion
 
 	async def cog_load(self):
 		self.check_task = self.channels_check.start()
-		return await super().cog_load()
 	async def cog_unload(self):
 		self.check_task.cancel()
-		return await super().cog_unload()
-	#endregion
 
 async def setup(bot: 'Client._Bot'):
 	await bot.add_cog(VcCog())

@@ -26,11 +26,22 @@ class _Bot(commands.Bot):
 		async def on_error(self, interaction: discord.Interaction, error: Exception):
 			if isinstance(error, discord.app_commands.CheckFailure):
 				return
+
+			msg = "Oops! Something went wrong."
 			if isinstance(error, discord.app_commands.CommandOnCooldown):
-				await interaction.response.send_message("This command is on cooldown")
+				msg = "This command is on cooldown"
+			elif isinstance(error, ext.NoConfigError):
+				msg = "This server is not configured."
+			elif isinstance(error, ext.MissingConfigError):
+				msg = f"This server is not configured for this action: {error}"
+
 			if not interaction.response.is_done():
-				await interaction.response.send_message("Oops! Something went wrong.", ephemeral=True)
-			raise error  # still log real bugs
+				await interaction.response.send_message(msg, ephemeral=True)
+			else:
+				await interaction.edit_original_response(content=msg)
+
+			raise error from error  # still log real bugs
+
 	RUNNING_SINCE: datetime = datetime.now(UTC)
 	def __init__(self, *args,**kwargs):
 		intents = discord.Intents.all()

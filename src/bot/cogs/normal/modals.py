@@ -42,7 +42,6 @@ class ReportModal(discord.ui.Modal, title="Report user"):
 	message = discord.ui.Label(
 		text="Message",
 		component=discord.ui.TextInput(
-			min_length=1,
 			max_length=2048,
 			custom_id="report_msg",
 			style=discord.TextStyle.paragraph,
@@ -68,7 +67,7 @@ class ReportModal(discord.ui.Modal, title="Report user"):
 		#raise NotImplementedError("Currently rebuilding this code")
 		await interaction.response.defer(thinking=True, ephemeral=True)
 
-		config =await Config.get(interaction.guild_id)
+		config = await Config.get(interaction.guild_id)
 		if not config:
 			await interaction.edit_original_response(content="Could not get guild configs. No changes were made.")
 			return
@@ -81,13 +80,18 @@ class ReportModal(discord.ui.Modal, title="Report user"):
 		report_category:discord.ui.Select = self.find_item(69)
 
 		username:str = self.user.component.value.strip()
-		member = await management.get(username=username)
-		if member is None:
+		members = await management.get(username=username)
+		for member in members:
+			if member.username != username:
+				continue
+			if member.status == member.Status.EX_MEMBER:
+				await interaction.edit_original_response(content="This user is no longer a part of our squadron")
+				return
+			break
+		else:
 			await interaction.edit_original_response(content="No such user exists in our database")
 			return
-		if member.status == member.Status.EX_MEMBER:
-			await interaction.edit_original_response(content="This user is no longer a part of our squadron")
-			return
+
 
 		REPLAY_URL_REGEX = re.match(r"^https://warthunder\.com/[a-z]{2}/tournament/replay/([A-Fa-f0-9]{1,16})$", url)
 		if not REPLAY_URL_REGEX:
@@ -154,7 +158,7 @@ class ReportView(discord.ui.LayoutView):
 		await self.change_page()
 		return self
 	async def submit(self, interaction: discord.Interaction):
-		pass
+		pass # TODO: Implement
 	async def pgup(self, interaction: discord.Interaction):
 		await interaction.response.defer()
 		self.current_page += 1

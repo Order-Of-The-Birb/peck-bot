@@ -36,37 +36,35 @@ class AdminCog(commands.Cog):
 
 	@discord.app_commands.command()
 	@Client.guild_only()
+	@Client.owner_only()
 	@discord.app_commands.default_permissions(administrator=True)
-	@discord.app_commands.checks.has_permissions(administrator=True)
-	@discord.app_commands.describe(userid="The user's id to send the DM to", content="What will be sent")
-	async def senddm(self, interaction: ext.Interaction, userid:str, content:str):
-		"""Sends a DM to a specified user, used with an ID, Only usable by the bot owner"""
-		userid = int(userid)
-		user = await Client.BOT.fetch_user(userid)
-		await user.send(content=f"{content}\n-# From the PECK administration")
-		await interaction.response.send_message(f"{user} has recieved your message")
-
-	@discord.app_commands.command()
-	@Client.guild_only()
-	@discord.app_commands.default_permissions(administrator=True)
-	@discord.app_commands.checks.has_permissions(administrator=True)
-	async def say(self, interaction:ext.Interaction, content:str | None = None, file:discord.Attachment | None = None, respond_to_id:str | None = None):
+	async def say(self, interaction:ext.Interaction, content:str | None = None, file:discord.Attachment | None = None, respond_to_id:str | None = None, dm_to: discord.User | discord.Member | None = None):
 		"""Says the content as the bot, Only usable as the owner of the bot"""
 		await interaction.response.defer(ephemeral=True)
 		if not (content or file):
 			await interaction.edit_original_response(content="You must provide at least one of `content` or `file`")
 			return
 		if respond_to_id is not None and "-" in respond_to_id: # copy message ID returns <channelID>-<messageID> when holding shift
-			respond_msg = interaction.channel.get_partial_message(int(respond_to_id))
+			if dm_to:
+				respond_msg = dm_to.dm_channel.get_partial_message(int(respond_to_id))
+			else:
+				respond_msg = interaction.channel.get_partial_message(int(respond_to_id))
 			if respond_msg is None:
 				await interaction.edit_original_response(content="Channel ID for message doesn't match the current channel")
 				return
 			respond_to_id = respond_msg.id
-		await interaction.channel.send(
-			content=content.replace("\\n", "\n"),
-			file=(await file.to_file()) if file else None,
-			reference=interaction.channel.get_partial_message(int(respond_to_id)) if respond_to_id else None
-		)
+		if dm_to is not None:
+			await dm_to.send(
+				content.replace("\\n", "\n"),
+				file=(await file.to_file()) if file else None,
+				reference=interaction.channel.get_partial_message(int(respond_to_id)) if respond_to_id else None
+			)
+		else:
+			await interaction.channel.send(
+				content=content.replace("\\n", "\n"),
+				file=(await file.to_file()) if file else None,
+				reference=interaction.channel.get_partial_message(int(respond_to_id)) if respond_to_id else None
+			)
 		await interaction.delete_original_response()
 
 	@discord.app_commands.command()

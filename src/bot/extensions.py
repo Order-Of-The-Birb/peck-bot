@@ -7,11 +7,12 @@ if TYPE_CHECKING:
 
 
 class ForumChannel(discord.ForumChannel):
-	def __init__(self, *, state, guild, data):
-		super().__init__(state=state, guild=guild, data=data)
+	__slots__ = ()
 
-	async def get_threads(self):
+	async def get_threads(self, *, exclude_pinned:bool = False):
 		for thread in self.threads:
+			if exclude_pinned and thread.flags.pinned:
+				continue
 			yield thread
 		async for thread in self.archived_threads(limit=None):
 			yield thread

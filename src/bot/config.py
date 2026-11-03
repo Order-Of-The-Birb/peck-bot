@@ -171,6 +171,7 @@ class GuildConfig:
 			DISCORD = "discord_id"
 			TZ = "tz"
 			SQB = "sqb_part"
+			JOINDATE = "joined_at"
 		async def query(
 			self,
 			page:int = 1,
@@ -265,30 +266,39 @@ class GuildConfig:
 	@overload
 	def get(self, value: Categories) -> discord.CategoryChannel | None: ...
 	@overload
-	def get(self, value: Literal[Channels.ANNOUNCEMENTS, Channels.AUDIT_LOG, Channels.LOGS, Channels.SCORE]) -> discord.TextChannel | None: ...
+	def get(self, value: Literal[Channels.ANNOUNCEMENTS, Channels.AUDIT_LOG, Channels.LOGS, Channels.SCORE, Channels.PROPAGANDA]) -> discord.TextChannel | None: ...
 	@overload
-	def get(self, value: Literal[Channels.WTNEWS, Channels.PROPAGANDA, Channels.CLIPS]) -> ext.ForumChannel | None: ...
+	def get(self, value: Literal[Channels.WTNEWS, Channels.CLIPS]) -> ext.ForumChannel | None: ...
 	def get(self, value: Roles|Channels|Categories):
 		if isinstance(value, Channels):
-			if value in [Channels.WTNEWS, Channels.PROPAGANDA, Channels.CLIPS]:
-				return ext.ForumChannel(Client.BOT.get_channel(self.__CHANNELS[value]))
-			if value in self.__CHANNELS:
-				return Client.BOT.get_channel(self.__CHANNELS[value])
+			if value not in self.__CHANNELS:
+				return None
+
+			channel = Client.BOT.get_channel(self.__CHANNELS[value])
+			if channel is None:
+				return None
+
+			if isinstance(channel, discord.ForumChannel):
+				channel.__class__ = ext.ForumChannel
+			return channel
 		elif isinstance(value, Categories):
 			if value not in self.__CATEGORIES:
 				return
+
 			for categ in self.guild.categories:
 				if categ.id != self.__CATEGORIES[value]:
 					continue
 				return categ
 		elif isinstance(value, Roles):
+			if value not in self.__ROLES:
+				return None
+
 			if value == Roles.COMMON:
 				if Roles.COMMON in self.__ROLES:
 					guild = self.guild
 					return tuple([guild.get_role(role) for role in self.__ROLES[Roles.COMMON]])
 				return ()
-			elif value in self.__ROLES:
-				return self.guild.get_role(self.__ROLES[value])
+			return self.guild.get_role(self.__ROLES[value])
 		return None
 
 	@property
@@ -319,26 +329,21 @@ class GuildConfig:
 
 	async def random_propaganda(self):
 		channel = self.get(Channels.PROPAGANDA)
-
-		threads: list[discord.Thread] = []
-		for post in channel.threads:
-			if post.starter_message.content.startswith("[Unverified]"):
-				continue
-			threads.append(post)
-		async for post in channel.archived_threads(limit=None):
-			threads.append(post)
+		if channel is None:
+			raise ext.MissingConfigError("Propaganda channel not set up")
 
 		attachments = []
-		for post in threads:
-			if not post.starter_message.attachments:
-				await post.delete(reason="No propaganda attachment given")
+		async for msg in channel.history(limit=None):
+			if not msg.attachments:
+				await msg.delete(reason="No propaganda attachment given")
 			else:
-				attachments.extend(post.starter_message.attachments)
-
-		return choice(attachments) if attachments else None
+				attachments.extend(msg.attachments)
+		if attachments:
+			return choice(attachments)
+		return None
 
 	async def setup(self, channel: Channels):
-		pass
+		pass # TODO: Implement
 
 __CACHE: dict[int, GuildConfig] = {}
 
