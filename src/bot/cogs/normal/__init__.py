@@ -10,6 +10,7 @@ from psutil._common import bytes2human
 
 import bot.client as Client
 import bot.config as Config
+import bot.extensions as ext
 import utils.helper as helperUtil
 import utils.media as Media
 import utils.thunderapi as ThunderAPI
@@ -25,14 +26,14 @@ class NormalCog(commands.Cog):
 
 	@discord.app_commands.command(description="Command to report a squadron member")
 	@Client.guild_only()
-	async def report(self, interaction: Client.Interaction):
+	async def report(self, interaction: ext.Interaction):
 		await interaction.response.defer(thinking=True)
 		await interaction.edit_original_response(
 			view = await Modals.ReportView.create(interaction)
 		)
 
 	@discord.app_commands.command()
-	async def info(self, interaction:Client.Interaction):
+	async def info(self, interaction:ext.Interaction):
 		embed = discord.Embed(title="Bot info", color=0xFF0000)
 		embed.add_field(name="Ping", value=f"{round(Client.BOT.latency*1000, 2)} ms", inline=False)
 		uptime = datetime.now(UTC)-Client.BOT.RUNNING_SINCE
@@ -45,7 +46,7 @@ class NormalCog(commands.Cog):
 		await interaction.response.send_message(embed=embed)
 
 	@discord.app_commands.command()
-	async def convert_to_gif(self, interaction:Client.Interaction, image:discord.Attachment, name_appendix: str = ""):
+	async def convert_to_gif(self, interaction:ext.Interaction, image:discord.Attachment, name_appendix: str = ""):
 		await interaction.response.defer(thinking=True)
 		try:
 			file = await Media.convertImageToGif(image, name_appendix=name_appendix)
@@ -55,7 +56,7 @@ class NormalCog(commands.Cog):
 		await interaction.edit_original_response(content="Here you go", attachments=[file,])
 
 	@discord.app_commands.command()
-	async def ge_to_gjn(self, interaction:Client.Interaction, value:int):
+	async def ge_to_gjn(self, interaction:ext.Interaction, value:int):
 		msg_content = ""
 		if value % 10 != 0: # Gaijin limitation: Only sold in steps of 10
 			value = round(value, -1)
@@ -69,7 +70,7 @@ class NormalCog(commands.Cog):
 		await interaction.response.send_message(msg_content)
 
 	@discord.app_commands.command()
-	async def top_members(self, interaction: Client.Interaction, number:int=8):
+	async def top_members(self, interaction: ext.Interaction, number:int=8):
 		"""Requests the top `number` highest SQB Activity people from the squadron"""
 		await interaction.response.defer(thinking=True)
 		config =await Config.get(interaction.guild_id)
@@ -97,7 +98,7 @@ class NormalCog(commands.Cog):
 
 	@group_download.command(name="medal", description="Gives the raw .mp4 of the shared link")
 	@discord.app_commands.describe(share_url="Medal share link to the clip")
-	async def download_medal_clip(self, interaction:Client.Interaction, share_url:str):
+	async def download_medal_clip(self, interaction:ext.Interaction, share_url:str):
 		URL_REGEX = re.compile(r"https://medal.tv/games/(.*)/clips/(.*)")
 		if URL_REGEX.fullmatch(share_url) is None:
 			await interaction.response.send_message(content="You did not provide a valid medal.tv url.", ephemeral=True)
@@ -115,7 +116,7 @@ class NormalCog(commands.Cog):
 
 	@group_requests.command(name="warthunder")
 	@discord.app_commands.describe(user="The user to search for")
-	async def request_wt(self, interaction: Client.Interaction, user:discord.Member):
+	async def request_wt(self, interaction: ext.Interaction, user:discord.Member):
 		"""Requests a user's War Thunder username(s) from the database"""
 		await interaction.response.defer(thinking=True)
 		config = await Config.get(interaction)
@@ -134,7 +135,7 @@ class NormalCog(commands.Cog):
 
 	@group_requests.command(name="discord")
 	@discord.app_commands.describe(user="The War Thunder username to search for")
-	async def request_dc(self, interaction: Client.Interaction, user:str):
+	async def request_dc(self, interaction: ext.Interaction, user:str):
 		"""Requests a user's ID based on the WT username in the database"""
 		await interaction.response.defer(thinking=True, ephemeral=True)
 		config = await Config.get(interaction)
@@ -155,7 +156,7 @@ class NormalCog(commands.Cog):
 	# endregion
 
 	@discord.app_commands.command()
-	async def deepseek_peak(self, interaction: Client.Interaction):
+	async def deepseek_peak(self, interaction: ext.Interaction):
 		"""Determines whether currently it is on- or off-peak for Deepseek:tm: API token usage"""
 		peak_times = (
 			( time(hour=1, tzinfo=UTC), time(hour=4, tzinfo=UTC) ),

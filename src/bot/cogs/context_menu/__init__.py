@@ -5,6 +5,7 @@ from discord.ext import commands
 
 import bot.client as Client
 import bot.config as Config
+import bot.extensions as ext
 
 
 class ContextMenuCog(commands.Cog):
@@ -18,7 +19,7 @@ class ContextMenuCog(commands.Cog):
 		)
 		self.logger.debug(f"{self.__class__.__name__} initialized")
 
-	async def get_wt_name(self, interaction:Client.Interaction, user:discord.Member):
+	async def get_wt_name(self, interaction:ext.Interaction, user:discord.Member):
 		await interaction.response.defer(ephemeral=True, thinking=True)
 		config =await Config.get(interaction.guild_id)
 		if config is None:

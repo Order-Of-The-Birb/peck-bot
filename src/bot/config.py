@@ -13,6 +13,7 @@ from aiohttp import ClientResponseError
 from typing_extensions import Doc
 
 import bot.client as Client
+import bot.extensions as ext
 import utils.network as Network
 from paths import GUILDS
 
@@ -266,9 +267,11 @@ class GuildConfig:
 	@overload
 	def get(self, value: Literal[Channels.ANNOUNCEMENTS, Channels.AUDIT_LOG, Channels.LOGS, Channels.SCORE]) -> discord.TextChannel | None: ...
 	@overload
-	def get(self, value: Literal[Channels.WTNEWS, Channels.PROPAGANDA, Channels.CLIPS]) -> discord.ForumChannel | None: ...
+	def get(self, value: Literal[Channels.WTNEWS, Channels.PROPAGANDA, Channels.CLIPS]) -> ext.ForumChannel | None: ...
 	def get(self, value: Roles|Channels|Categories):
 		if isinstance(value, Channels):
+			if value in [Channels.WTNEWS, Channels.PROPAGANDA, Channels.CLIPS]:
+				return ext.ForumChannel(Client.BOT.get_channel(self.__CHANNELS[value]))
 			if value in self.__CHANNELS:
 				return Client.BOT.get_channel(self.__CHANNELS[value])
 		elif isinstance(value, Categories):
@@ -334,10 +337,13 @@ class GuildConfig:
 
 		return choice(attachments) if attachments else None
 
+	async def setup(self, channel: Channels):
+		pass
+
 __CACHE: dict[int, GuildConfig] = {}
 
-async def get(guild_id: int | Client.Interaction) -> GuildConfig | None:
-	if isinstance(guild_id, Client.Interaction):
+async def get(guild_id: int | ext.Interaction) -> GuildConfig | None:
+	if isinstance(guild_id, ext.Interaction):
 		guild_id = guild_id.guild_id
 	if guild_id in __CACHE:
 		return __CACHE[guild_id]

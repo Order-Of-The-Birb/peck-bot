@@ -8,6 +8,7 @@ from discord.ext import commands, tasks
 
 import bot.client as Client
 import bot.config as Config
+import bot.extensions as ext
 
 
 class SquadVC:
@@ -64,7 +65,7 @@ class VcCog(commands.GroupCog, group_name="squad"):
 		discord.app_commands.Choice(name="No limit", value=-1)
 	])
 	@discord.app_commands.checks.cooldown(1, 30*60)
-	async def create_vc(self, interaction:Client.Interaction, size:int, private:bool = False):
+	async def create_vc(self, interaction:ext.Interaction, size:int, private:bool = False):
 		"""Creates a new squad VC with a set size (4,8 or 10). Will not create one if you already have one active."""
 		await interaction.response.defer(thinking=True)
 		config = await Config.get(interaction)

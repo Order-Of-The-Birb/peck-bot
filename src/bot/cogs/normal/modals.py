@@ -3,8 +3,8 @@ import re
 
 import discord
 
-import bot.client as Client
 import bot.config as Config
+import bot.extensions as ext
 import utils.thunderapi as ThunderAPI
 
 _logger = logging.getLogger(__name__)
@@ -64,7 +64,7 @@ class ReportModal(discord.ui.Modal, title="Report user"):
 	)
 	def __init__(self):
 		super().__init__(timeout=15 * 60)
-	async def on_submit(self, interaction: Client.Interaction):
+	async def on_submit(self, interaction: ext.Interaction):
 		#raise NotImplementedError("Currently rebuilding this code")
 		await interaction.response.defer(thinking=True, ephemeral=True)
 
@@ -112,7 +112,7 @@ class ReportModal(discord.ui.Modal, title="Report user"):
 		_logger.debug(f"Report from {interaction.user.name} ({interaction.user.id})\nWT username: {username}\nReport message: {report_msg}")
 		await config.get(Config.Channels.LOGS).send(embed=embed)
 		await interaction.edit_original_response(content="Report submitted!")
-	async def on_error(self, interaction: Client.Interaction, error: Exception) -> None:
+	async def on_error(self, interaction: ext.Interaction, error: Exception) -> None:
 		await interaction.edit_original_response(content='Oops! Something went wrong.')
 		_logger.exception("An error occured while reporting", exc_info=error)
 
@@ -148,7 +148,7 @@ class ReportView(discord.ui.LayoutView):
 		self.find_item(2).callback = self.pgdown
 		self.find_item(3).callback = self.pgup
 	@classmethod
-	async def create(cls, interaction: Client.Interaction):
+	async def create(cls, interaction: ext.Interaction):
 		self = cls()
 		self.config = interaction.extras["config"]
 		await self.change_page()

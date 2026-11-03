@@ -4,13 +4,14 @@ import discord
 from discord.ext import commands
 
 import bot.client as Client
+import bot.extensions as ext
 
 
 class AdminCog(commands.Cog):
 	def __init__(self):
 		self.logger = logging.getLogger(__name__)
 		self.logger.debug(f"{self.__class__.__name__} initialized")
-	async def interaction_check(self, interaction:Client.Interaction):
+	async def interaction_check(self, interaction:ext.Interaction):
 		if isinstance(interaction.channel, discord.DMChannel):
 			self.logger.warning(f"Unauthorized request\n\tCommand:{interaction.command.name}\t\nUser:{interaction.user.name}({interaction.user.id})\n\tReason: Admin command in DMs")
 			await interaction.response.send_message("You need to execute this command in a server (Required to check for permissions)")
@@ -25,7 +26,7 @@ class AdminCog(commands.Cog):
 	@discord.app_commands.default_permissions(manage_messages=True)
 	@discord.app_commands.checks.has_permissions(manage_messages=True)
 	@discord.app_commands.describe(count="The amount of messages to purge")
-	async def purge(self, interaction:Client.Interaction, count:int):
+	async def purge(self, interaction:ext.Interaction, count:int):
 		if count < 1:
 			await interaction.response.send_message(content="Count too low.", ephemeral=True)
 			return
@@ -38,7 +39,7 @@ class AdminCog(commands.Cog):
 	@discord.app_commands.default_permissions(administrator=True)
 	@discord.app_commands.checks.has_permissions(administrator=True)
 	@discord.app_commands.describe(userid="The user's id to send the DM to", content="What will be sent")
-	async def senddm(self, interaction: Client.Interaction, userid:str, content:str):
+	async def senddm(self, interaction: ext.Interaction, userid:str, content:str):
 		"""Sends a DM to a specified user, used with an ID, Only usable by the bot owner"""
 		userid = int(userid)
 		user = await Client.BOT.fetch_user(userid)
@@ -49,15 +50,18 @@ class AdminCog(commands.Cog):
 	@Client.guild_only()
 	@discord.app_commands.default_permissions(administrator=True)
 	@discord.app_commands.checks.has_permissions(administrator=True)
-	async def say(self, interaction:Client.Interaction, content:str, file:discord.Attachment | None = None, respond_to_id:str | None = None):
+	async def say(self, interaction:ext.Interaction, content:str | None = None, file:discord.Attachment | None = None, respond_to_id:str | None = None):
 		"""Says the content as the bot, Only usable as the owner of the bot"""
 		await interaction.response.defer(ephemeral=True)
-		if "-" in respond_to_id: # copy message ID returns <channelID>-<messageID> when holding shift
-			parts = respond_to_id.split("-")
-			if parts[0] != str(interaction.channel_id):
+		if not (content or file):
+			await interaction.edit_original_response(content="You must provide at least one of `content` or `file`")
+			return
+		if respond_to_id is not None and "-" in respond_to_id: # copy message ID returns <channelID>-<messageID> when holding shift
+			respond_msg = interaction.channel.get_partial_message(int(respond_to_id))
+			if respond_msg is None:
 				await interaction.edit_original_response(content="Channel ID for message doesn't match the current channel")
 				return
-			respond_to_id = parts[1]
+			respond_to_id = respond_msg.id
 		await interaction.channel.send(
 			content=content.replace("\\n", "\n"),
 			file=(await file.to_file()) if file else None,
@@ -87,7 +91,7 @@ class AdminCog(commands.Cog):
 			discord.app_commands.Choice(name="7d", value=7*24*60*60),
 		]
 	)
-	async def softban(self, interaction:Client.Interaction, user:discord.Member, reason:str, delete_messages:int):
+	async def softban(self, interaction:ext.Interaction, user:discord.Member, reason:str, delete_messages:int):
 		await interaction.response.defer(thinking=True, ephemeral=True)
 		if delete_messages > 24*60*60:
 			await user.ban(delete_message_days=delete_messages//24//60//60, reason=reason)

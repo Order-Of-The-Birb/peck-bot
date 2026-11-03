@@ -7,6 +7,7 @@ from discord.ext import commands
 
 import bot.client as Client
 import bot.config as Config
+import bot.extensions as ext
 
 old_timer_interval = relativedelta(years=1)
 class RolesCog(commands.GroupCog, group_name="role"):
@@ -14,7 +15,7 @@ class RolesCog(commands.GroupCog, group_name="role"):
 		self.logger = logging.getLogger(__name__)
 		self.logger.debug(f"{self.__class__.__name__} initialized")
 
-	async def interaction_check(self, interaction: Client.Interaction):
+	async def interaction_check(self, interaction: ext.Interaction):
 		if isinstance(interaction.channel, discord.DMChannel):
 			await interaction.response.send_message("This command can only be run in servers.")
 			return False
@@ -26,7 +27,7 @@ class RolesCog(commands.GroupCog, group_name="role"):
 		discord.app_commands.Choice(name="sqb ping",value=1),
 		discord.app_commands.Choice(name="old timer",value=2)
 	])
-	async def get_role(self, interaction:Client.Interaction, role:int):
+	async def get_role(self, interaction:ext.Interaction, role:int):
 		await interaction.response.defer(thinking=True)
 		config =await Config.get(interaction.guild_id)
 		if config is None:
@@ -72,7 +73,7 @@ class RolesCog(commands.GroupCog, group_name="role"):
 	@discord.app_commands.choices(role=[
 		discord.app_commands.Choice(name="sqb ping", value=1)
 	])
-	async def rm_role(self, interaction:Client.Interaction, role:int):
+	async def rm_role(self, interaction:ext.Interaction, role:int):
 		await interaction.response.defer(thinking=True, ephemeral=True)
 		if role == 1:
 			pingrole = interaction.extras["config"].get(Config.Roles.PING)

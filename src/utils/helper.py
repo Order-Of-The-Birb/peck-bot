@@ -4,6 +4,7 @@ import logging
 import discord
 
 import bot.client as Client
+import bot.extensions as Shared
 
 logger = logging.getLogger(__name__)
 
@@ -13,39 +14,16 @@ def demarkdownify(text:str):
 		text = text.replace(i, "\\"+i)
 	return text
 
-async def get_threads(channel: discord.ForumChannel):
-	for thread in channel.threads:
-		yield thread
-	async for thread in channel.archived_threads(limit=None):
-		yield thread
-
-def is_user_clip_thread(thread: discord.Thread, user_id: int) -> bool:
-	try:
-		if int(thread.name) == user_id:
-			return True
-	except ValueError:
-		return False
-	return False
-
-async def get_clip_thread(channel: discord.ForumChannel, user_id: int) -> discord.Thread | None:
-	async for thread in get_threads(channel):
-		if is_user_clip_thread(thread, user_id):
-			return thread
-	return None
-async def get_pinned_thread(channel: discord.ForumChannel) -> discord.Thread | None:
-	async for thread in get_threads(channel):
-		if thread.flags.pinned:
-			return thread
-	return None
-
-async def get_clip_threads(channel: discord.ForumChannel, user_id: int) -> tuple[discord.Thread | None, discord.Thread | None]:
+async def get_clip_threads(channel: Shared.ForumChannel, user_id: int) -> tuple[discord.Thread | None, discord.Thread | None]:
 	user_thread: discord.Thread | None = None
 	vote_thread: discord.Thread | None = None
 
-	async for thread in get_threads(channel):
+	name = str(user_id)
+
+	async for thread in channel.get_threads():
 		if thread.flags.pinned:
 			vote_thread = thread
-		elif user_thread is None and is_user_clip_thread(thread, user_id):
+		elif user_thread is None and thread.name == name:
 			user_thread = thread
 		if vote_thread is not None and user_thread is not None:
 			break

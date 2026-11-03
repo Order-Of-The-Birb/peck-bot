@@ -5,12 +5,13 @@ from datetime import UTC, datetime
 from importlib import reload
 from sys import modules as sysmodules
 from types import ModuleType
-from typing import Protocol, TypedDict
+from typing import Protocol
 
 import discord
 from discord.ext import commands
 
 import bot.config as Config
+import bot.extensions as ext
 import paths
 from bot.cogs import EXTENSIONS
 
@@ -104,11 +105,6 @@ class _Bot(commands.Bot):
 			_logger.exception("An error occured while syncing")
 		_logger.info("Startup complete")
 
-class _InteractionExtras(TypedDict):
-	config: Config.GuildConfig | None
-class Interaction(discord.Interaction):
-	extras: _InteractionExtras
-
 #region Decorators
 def guild_config():
 	async def predicate(interaction: discord.Interaction) -> bool:
@@ -122,8 +118,7 @@ def guild_only():
 	async def predicate(interaction: discord.Interaction) -> bool:
 		config = await Config.get(interaction.guild_id)
 		if config is None:
-			await interaction.response.send_message("This server is not configured")
-			return False
+			raise ext.NoConfigError()
 		interaction.extras["config"] = config
 		return True
 	def decorator(func):
@@ -160,10 +155,10 @@ class genericButtons(discord.ui.View):
 	class _callbackProtocol(Protocol):
 		async def __call__(
 			self,
-			interaction: Interaction,
+			interaction: ext.Interaction,
 			**kwargs
 		) -> bool|None: ...
-	def __init__(self, *, acceptFunc:_callbackProtocol, denyFunc:_callbackProtocol|None=None, timeout:int|None = 180, acceptLabel:str = "Yes", denyLabel:str="No", deny:bool=True, removeButtonsAfter:bool=False, requiredPerms:discord.Permissions|None=None, id: str | None = None, **kwargs):
+	def __init__(self, *, acceptFunc:_callbackProtocol, denyFunc:_callbackProtocol|None=None, timeout:int|None = 180, acceptLabel:str = "Yes", denyLabel:str="No", deny:bool=True, removeButtonsAfter:bool=False, requiredPerms:discord.Permissions|None=None, **kwargs):
 		if deny and denyFunc is None:
 			raise ValueError("deny=True requires denyFunc to be provided")
 		self.requiredPerms = requiredPerms
@@ -178,7 +173,7 @@ class genericButtons(discord.ui.View):
 			style=discord.ButtonStyle.red,
 			custom_id="deny"
 		)
-		async def yes_callback(interaction: Interaction):
+		async def yes_callback(interaction: ext.Interaction):
 			await interaction.response.edit_message(view=self)
 			if self.requiredPerms is not None and not all(getattr(interaction.user.guild_permissions, p[0], False) for p in self.requiredPerms if p[1]):
 				_logger.warning(f"Accept attempt by: {interaction.user.name} ({interaction.user.id})")
@@ -195,7 +190,7 @@ class genericButtons(discord.ui.View):
 						await interaction.edit_original_response(view=None)
 					except discord.NotFound:
 						pass # The callback may already have deleted the message.
-		async def no_callback(interaction: Interaction):
+		async def no_callback(interaction: ext.Interaction):
 			await interaction.response.edit_message(view=self)
 			if self.requiredPerms is not None and not all(getattr(interaction.user.guild_permissions, p[0], False) for p in self.requiredPerms if p[1]):
 				_logger.warning(f"Deny attempt by: {interaction.user.name} ({interaction.user.id})")

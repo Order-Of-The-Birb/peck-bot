@@ -6,6 +6,7 @@ from discord.ext import commands
 #import utils.time as timeUtil
 import bot.client as Client
 import bot.config as Config
+import bot.extensions as ext
 
 from . import modals as Modals
 
@@ -16,29 +17,27 @@ class ClipsCog(commands.GroupCog, group_name="clips"):
 		self.logger.debug(f"{self.__class__.__name__} initialized")
 
 	@discord.app_commands.command(name="upload")
-	async def upload_clip(self, interaction:Client.Interaction):
+	async def upload_clip(self, interaction:ext.Interaction):
 		await interaction.response.send_modal(Modals.CreateClip())
 
 	@discord.app_commands.command(name="add_alias")
-	async def add_alias(self, interaction:Client.Interaction):
+	async def add_alias(self, interaction:ext.Interaction):
 		await interaction.response.send_modal(Modals.CreateAlias())
 
 	@discord.app_commands.command(name="remove_alias")
 	@discord.app_commands.default_permissions(manage_channels=True)
+	@Client.guild_only()
 	@Client.admin_only()
-	async def remove_alias(self, interaction:Client.Interaction, alias:str, user:discord.User):
+	async def remove_alias(self, interaction:ext.Interaction, alias:str, user:discord.User):
 		await interaction.response.defer(thinking=True, ephemeral=True)
 
-		config =await Config.get(interaction.guild.id)
-		if config is None:
-			await interaction.edit_original_response(content="An error occurred while loading server data")
+		clips_channel = interaction.extras["config"].get(Config.Channels.CLIPS)
+		if clips_channel is None:
+			await interaction.edit_original_response(content="This server is not configured for this action")
 			return
-		category = config.get(Config.Channels.CLIPS)
-		if category is None:
-			raise LookupError(f"Could not find clips category in guild {interaction.guild_id}")
 
 		userClipCh = None
-		for ch in category.channels:
+		for ch in clips_channel:
 			if ch.name != str(user.id):
 				continue
 			userClipCh = ch

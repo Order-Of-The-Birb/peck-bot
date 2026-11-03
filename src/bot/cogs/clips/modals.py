@@ -2,8 +2,8 @@ import asyncio
 
 import discord
 
-import bot.client as Client
 import bot.config as Config
+import bot.extensions as ext
 import utils.helper as helperUtil
 
 
@@ -51,7 +51,7 @@ class CreateClip(discord.ui.Modal, title="Propose new clip"):
 	def __init__(self):
 		super().__init__(timeout=600)
 
-	async def on_submit(self, interaction: Client.Interaction):
+	async def on_submit(self, interaction: ext.Interaction):
 		self.stop()
 		await interaction.response.defer(thinking=True, ephemeral=True)
 
@@ -109,7 +109,7 @@ class CreateAlias(discord.ui.Modal, title="Propose new alias"):
 	def __init__(self):
 		super().__init__(timeout=600)
 
-	async def on_submit(self, interaction:Client.Interaction):
+	async def on_submit(self, interaction:ext.Interaction):
 		await interaction.response.defer(ephemeral=True, thinking=True)
 
 		config =await Config.get(interaction.guild_id)

@@ -7,13 +7,14 @@ from discord.ext import commands
 from psutil._common import bytes2human
 
 import bot.client as Client
+import bot.extensions as ext
 import utils.newsAPI as NewsAPI
 import utils.thunderapi as ThunderAPI
 from bot.cogs import EXTENSIONS
 from utils.memory import cache_counts, process_memory
 
 
-async def reload_autocomplete(interaction: Client.Interaction, current: str):
+async def reload_autocomplete(interaction: ext.Interaction, current: str):
 	options = [
 		discord.app_commands.Choice(name=i, value=i)
 		for i in [i.removeprefix("bot.cogs.") for i in EXTENSIONS] if current.lower() in i.lower()
@@ -26,12 +27,12 @@ class OwnerCog(commands.Cog):
 		self.logger = logging.getLogger(__name__)
 		self.logger.debug(f"{self.__class__.__name__} initialized")
 
-	async def interaction_check(self, interaction:Client.Interaction):
+	async def interaction_check(self, interaction:ext.Interaction):
 		return interaction.user.id in [332030423913725953, 709449854371364895]
 
 	@discord.app_commands.command(name="memory", description="Inspect bot RAM and cache counts")
 	@Client.owner_only()
-	async def memory(self, interaction: Client.Interaction):
+	async def memory(self, interaction: ext.Interaction):
 		await interaction.response.defer(ephemeral=True)
 		memory = await asyncio.to_thread(process_memory)
 		counts = cache_counts(Client.BOT)
@@ -53,7 +54,7 @@ class OwnerCog(commands.Cog):
 	@discord.app_commands.command()
 	@Client.owner_only()
 	@discord.app_commands.autocomplete(extension=reload_autocomplete)
-	async def reload(self, interaction:Client.Interaction, extension:str):
+	async def reload(self, interaction:ext.Interaction, extension:str):
 		await interaction.response.defer(ephemeral=True)
 		try:
 			if extension.lower() == "all":
@@ -69,7 +70,7 @@ class OwnerCog(commands.Cog):
 
 	@discord.app_commands.command()
 	@Client.owner_only()
-	async def force_sync(self, interaction:Client.Interaction):
+	async def force_sync(self, interaction:ext.Interaction):
 		await interaction.response.defer(thinking=True)
 		try:
 			synced = await Client.BOT.tree.sync()
@@ -81,7 +82,7 @@ class OwnerCog(commands.Cog):
 
 	@discord.app_commands.command()
 	@Client.debug_only()
-	async def test_news(self, interaction: Client.Interaction):
+	async def test_news(self, interaction: ext.Interaction):
 		await interaction.response.defer(thinking=True)
 		async with ClientSession(ThunderAPI._api_url) as session, session.get("/v1/news") as r:
 			r.raise_for_status()
