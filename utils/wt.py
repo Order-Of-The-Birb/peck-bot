@@ -2,12 +2,12 @@ from __future__ import annotations
 import logging, requests, re
 from concurrent.futures import ThreadPoolExecutor
 from bs4 import BeautifulSoup
-from urllib.parse import quote
 from json import loads
-from time import sleep
+from time import monotonic, sleep
 from datetime import datetime, UTC
+from copy import copy
 from email.utils import parsedate_to_datetime
-from functools import cache
+from functools import lru_cache
 from typing import TYPE_CHECKING
 from contextlib import asynccontextmanager
 if __name__ == "__main__":
@@ -16,15 +16,14 @@ if __name__ == "__main__":
 	sys_path.append(path.abspath(path.join(path.dirname(__file__), '..')))
 from utils.time import discord_timestamp, sqb_brackets, timestampTypes
 from utils.generic import httperror
+from utils.squadron import squadron_member_rows, squadron_url
+from utils.sqb import SQB_SCHEDULE_HEADERS, SQB_SCHEDULE_TTL, SQB_SCHEDULE_URL, parse_sqb_season, sqbBracket
 from utils.resources import browser_slot
 if TYPE_CHECKING:
 	from utils.bot import Bot
 	from playwright.async_api import Page as aPage
 logger = logging.getLogger(__name__)
 
-headers = {
-	"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36 OPR/117.0.0.0"
-}
 @asynccontextmanager
 async def _closing_browser_resource(resource):
 	"""Preserve the first error or cancellation; surface close failures after successful use."""
@@ -210,7 +209,7 @@ class Squadron:
 			self.role:str = data[4]
 			self.joindate:datetime = datetime.strptime(data[5], "%d.%m.%Y")
 	def __init__(self, squadron_name:str):
-		self.URL = f"https://warthunder.com/en/community/claninfo/{quote(squadron_name)}"
+		self.URL = squadron_url(squadron_name)
 		self._logger = logging.getLogger(__name__)
 	def __contains__(self, name:str): return name in self.GetNames()
 	def __iter__(self): return iter(self.members)
@@ -238,12 +237,7 @@ class Squadron:
 				content = await page.content()
 		else:
 			content = await page.content()
-		soup = BeautifulSoup(content, "html.parser")
-		try:
-			divs = [i.text.strip() for i in soup.find("div", {"class":"squadrons-members__table"}).find_all("div", {"class":"squadrons-members__grid-item"})[6:]]
-			self.members = tuple(self.Member(divs[i:i+6]) for i in range(0, len(divs), 6))
-		finally:
-			soup.decompose()
+		self.members = tuple(self.Member(row) for row in squadron_member_rows(content))
 	async def updateStats(self, page:aPage|None=None):
 		if page is None:
 			async with self.openPage() as page:
@@ -302,56 +296,21 @@ class Squadron:
 					page = await context.new_page()
 					await page.goto(self.URL, wait_until="domcontentloaded")
 					yield page
-@cache
-def _parse_sqb_weeks() -> list[dict[str, datetime|float]]:
-	URL = "https://forum.warthunder.com/t/season-schedule-for-squadron-battles/4446"
-	response = requests.get(URL, headers=headers)
-	if response.status_code != 200:
-		raise LookupError(f"WT Forums gave back an error: {response.status_code} ({httperror(response)})")
-	post = str(BeautifulSoup(response.text, 'html.parser').find("div", class_="post").find_all("p")[1]).removeprefix("<p>").removesuffix("</p>").replace("<br/>","").split("\n")
+@lru_cache(maxsize=1)
+def _fetch_sqb_season(_cache_period:int) -> tuple[sqbBracket, ...]:
+	with requests.get(SQB_SCHEDULE_URL, headers=SQB_SCHEDULE_HEADERS, timeout=(3, 5)) as response:
+		if response.status_code != 200:
+			raise LookupError(f"WT Forums gave back an error: {response.status_code} ({httperror(response)})")
+		return tuple(parse_sqb_season(response.text))
 
-	rn = datetime.now(UTC)
-	weeks = []
-	for num, week in enumerate(post):
-		week_number = "Afterward"
-		main_regex = re.search(r"(([0-9]+) *(st|nd|rd|th|) week|) мах (BR|БР) ([0-9.]+) \(([0-9.]+)\D+([0-9.]+)\)", week, re.IGNORECASE)
-		if num != len(post)-1:
-			week_number = main_regex.group(1)
-			append_numbering = {"1":"st","2":"nd","3":"rd"}
-			if not any(i in week_number for i in [*append_numbering.values(), "th"]) and main_regex.group(3) is not None:
-				_ = main_regex.group(2)
-				week_number = week_number.replace(_, f"{_}{append_numbering.get(_[-1], "th")}")
-		br = float(main_regex.group(5))
-		start_time = datetime.strptime(f"{main_regex.group(6)}.{rn.year}", "%d.%m.%Y").replace(hour=sqb_brackets[0][0].hour, minute=0, second=0, tzinfo=UTC)
-		end_time = datetime.strptime(f"{main_regex.group(7)}.{rn.year}", "%d.%m.%Y").replace(hour=sqb_brackets[1][1].hour, minute=0, second=0, tzinfo=UTC)
-		weeks.append({
-			"week": week_number,
-			"br": br,
-			"start": start_time,
-			"end": end_time
-		})
-	return weeks
-class sqbBracket:
-	name: str
-	start: datetime
-	end: datetime
-	br: float
-	def __init__(self, week:dict[str, datetime|float]):
-		self.name = week.get("week")
-		self.start = week.get("start")
-		self.end = week.get("end")
-		self.br = week.get("br")
 def get_sqb_season() -> list[sqbBracket]:
-	weeks = _parse_sqb_weeks()
-	return [sqbBracket(week) for week in weeks]
+	return [copy(week) for week in _fetch_sqb_season(int(monotonic() // SQB_SCHEDULE_TTL))]
 def get_sqb_br(other_date:datetime|None = None) -> sqbBracket|None:
 	"""Gets the BR of a given day of SQB. Will get today if no date is given."""
-	if not other_date: rn = datetime.now(UTC)
-	else: rn = other_date.astimezone(UTC)
-	weeks = _parse_sqb_weeks()
-	for week in weeks:
-		if week["start"] <= rn < week["end"]:
-			return sqbBracket(week)
+	rn = datetime.now(UTC) if other_date is None else other_date.astimezone(UTC)
+	for week in get_sqb_season():
+		if week.start <= rn < week.end:
+			return week
 	return None
 def get_user_ids(*usernames:str) -> dict[str, int]:
 	raise DeprecationWarning("This function is deprecated as the endpoint has been shutdown. For progress on the new API check https://github.com/Order-Of-The-Birb/ThunderAPI")
