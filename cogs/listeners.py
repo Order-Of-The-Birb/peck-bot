@@ -94,6 +94,9 @@ class Listeners(commands.Cog):
 	@commands.Cog.listener()
 	async def on_message(self, message:discord.Message):
 		if message.author.id in self.bot.botIDs: return
+		ai_cog = self.bot.get_cog("PeckAICog")
+		if ai_cog is not None and ai_cog.mention_prompt(message) is not None:
+			return
 		if isinstance(message.channel, discord.DMChannel):
 			embed = discord.Embed(title=f"DM sent to PECK bot")
 			embed.add_field(name="", value=message.content, inline=True)

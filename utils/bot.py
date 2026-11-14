@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Literal, TypedDict
 from enum import StrEnum
 from os import getenv
 from modules.db import UserRepository
+from utils.squadron import PECK_SQUADRON_NAME
 from utils.wt import Squadron
 if TYPE_CHECKING:
 	from modules.newsAPI import NewsAPI
@@ -217,7 +218,7 @@ class Bot(commands.Bot):
 		self.runtime:AbstractEventLoop = kwargs.pop("runtime")
 		self.newsAPI:'NewsAPI' = kwargs.pop("newsAPI", None)
 		self.SQUADRON_TAG = "PECK"
-		self.squadron = Squadron("Order Of The Birb")
+		self.squadron = Squadron(PECK_SQUADRON_NAME)
 		super().__init__(tree_cls=_Tree, *args, **kwargs)
 	def _reload_prefix(self, prefix: str):
 		to_reload = [
