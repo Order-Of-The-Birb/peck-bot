@@ -32,10 +32,11 @@ class PeckAICog(commands.Cog):
 			or message.channel.id == self.bot.channelIDs[ChannelIDs.WTNEWS]
 		):
 			return None
-		mention, separator, prompt = message.content.lstrip().partition(">")
-		if not separator or mention not in (f"<@{bot_user.id}", f"<@!{bot_user.id}"):
-			return None
-		return prompt.lstrip().removeprefix(",").strip()
+		content = message.content.lstrip()
+		for mention in (f"<@{bot_user.id}>", f"<@!{bot_user.id}>"):
+			if content.startswith(mention):
+				return content[len(mention):].lstrip().removeprefix(",").strip()
+		return None
 
 	def _stored_timezone(self, author_id: int) -> int | None:
 		offsets = set()
