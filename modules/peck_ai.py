@@ -2,10 +2,16 @@
 
 import asyncio
 import json
+import logging
 from os import getenv
 from urllib.parse import urlsplit
 
 import aiohttp
+
+from modules.peck_lookup import DATA_API_ERROR, Lookup, format_lookup
+
+
+logger = logging.getLogger(__name__)
 
 
 class PeckAIError(Exception):
@@ -18,6 +24,9 @@ Use get_sqb_leaderboard for PECK's public Squadron Battles leaderboard.
 Use get_vehicle_br for vehicle battle ratings, even when you think you know the answer.
 Use the returned facts only. Say when information is unavailable and ask for clarification
 if a vehicle lookup is ambiguous. Distinguish the SQB BR cap from a vehicle's BR or research rank.
+Keep qualifiers such as "premium" and the vehicle's country in the vehicle search.
+Vehicle lookup statuses ambiguous, not_found, and unavailable mean different things; only ask which
+vehicle was meant for ambiguous results. Don't say the SQB queue is closed unless no window is active.
 For SQB local-time questions, leave the timezone argument absent unless the user gives an IANA
 zone or a UTC offset. Copy the tool's Discord timestamp strings exactly so Discord localizes them.
 When asked when SQB starts, give the upcoming window's discord_start. If a window is active,
@@ -112,12 +121,37 @@ class PeckAI:
         self._data_url = _base_url(data_api_url or getenv("PECK_DATA_API_URL") or "http://127.0.0.1:5001")
         self._model = model
 
+    async def check_data_service(self) -> None:
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"{self._data_url}/healthz", allow_redirects=False,
+                    timeout=aiohttp.ClientTimeout(total=3),
+                ) as response:
+                    payload = await _json_object(response, limit=1024)
+            if payload.get("service") != "peck-data":
+                raise ValueError("Unexpected data service response")
+        except (aiohttp.ClientError, TimeoutError, ValueError, RecursionError):
+            logger.warning("Peck data service health check failed; start or update modules.peck_data and check PECK_DATA_API_URL")
+
     async def answer(self, prompt: str, *, default_timezone: str | int | None = None) -> str:
         try:
             async with asyncio.timeout(90), aiohttp.ClientSession() as session:
                 return await self._answer(session, prompt, default_timezone)
         except (aiohttp.ClientError, TimeoutError, ValueError, KeyError, IndexError, TypeError, AttributeError, RecursionError) as exc:
             raise PeckAIError("Airbot request failed.") from exc
+
+    async def answer_lookup(self, lookup: Lookup, *, default_timezone: str | int | None = None) -> str:
+        arguments = {"vehicle": lookup.vehicle} if lookup.vehicle is not None else {}
+        async with aiohttp.ClientSession() as session:
+            result = await self._call_tool(
+                session, {"name": lookup.tool, "arguments": json.dumps(arguments)}, default_timezone,
+            )
+        try:
+            return format_lookup(lookup, result)
+        except (AttributeError, KeyError, TypeError):
+            logger.warning("Unexpected response from Peck data service for %s", lookup.tool)
+            return DATA_API_ERROR
 
     async def _answer(self, session: aiohttp.ClientSession, prompt: str, default_timezone: str | int | None) -> str:
         messages = [{"role": "system", "content": _SYSTEM}, {"role": "user", "content": prompt}]
@@ -169,6 +203,8 @@ class PeckAI:
             })
             for call in assistant_calls:
                 result = await self._call_tool(session, call["function"], default_timezone)
+                if result.get("status") == "data_api_unavailable":
+                    return DATA_API_ERROR
                 messages.append({
                     "role": "tool", "tool_call_id": call["id"],
                     "content": json.dumps(result, ensure_ascii=False),
@@ -217,8 +253,11 @@ class PeckAI:
                 if response.status == 422 and zone_source is not None:
                     return {"status": "invalid_timezone"}
                 result = await _json_object(response, limit=32768)
-        except (aiohttp.ClientError, TimeoutError, ValueError):
-            return {"status": "unavailable"}
+        except (aiohttp.ClientError, TimeoutError, ValueError, RecursionError) as exc:
+            # Avoid printing endpoint URLs or question text to logs.
+            detail = f"HTTP {exc.status}" if isinstance(exc, aiohttp.ClientResponseError) else type(exc).__name__
+            logger.warning("Peck data API request to %s failed (%s); check the data service and PECK_DATA_API_URL", path, detail)
+            return {"status": "data_api_unavailable"}
         if zone_source is not None:
             result["timezone_source"] = zone_source
         return result

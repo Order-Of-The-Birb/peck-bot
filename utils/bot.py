@@ -112,7 +112,6 @@ class Bot(commands.Bot):
 	ltsLock = Lock()
 	class Timeouts(TypedDict):
 		clip: 'Bot.GenericTimeout'
-		ai: 'Bot.GenericTimeout'
 	class GaijinLogin:
 		email:str
 		password:str
@@ -212,7 +211,6 @@ class Bot(commands.Bot):
 		self.logLevel:int = kwargs.pop("logLevel")
 		self.timeouts:Bot.Timeouts = {
 			"clip": self.GenericTimeout(self),
-			"ai": self.GenericTimeout(self)
 		}
 		self.squadVC = self._SquadVC()
 		self.runtime:AbstractEventLoop = kwargs.pop("runtime")

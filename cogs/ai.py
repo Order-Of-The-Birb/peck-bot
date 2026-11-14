@@ -7,6 +7,7 @@ import discord
 from discord.ext import commands
 
 from modules.peck_ai import PeckAI, PeckAIError
+from modules.peck_lookup import match_lookup
 from utils.bot import ChannelIDs
 
 if TYPE_CHECKING:
@@ -69,24 +70,18 @@ class PeckAICog(commands.Cog):
 			await self._reply(message, f"Please keep your question to {MAX_PROMPT_LENGTH:,} characters.")
 			return
 
+		lookup = match_lookup(prompt)
 		author_id = message.author.id
-		cooldown = self.bot.timeouts["ai"]
-		if cooldown.isTimedOut(author_id):
-			expires = cooldown.getExpireTime(author_id)
-			when = f" {discord.utils.format_dt(expires, style='R')}" if expires is not None else " later"
-			await self._reply(message, f"You’ve reached your Peck Bot limit. Try again{when}.")
-			return
-		if self.inference.locked():
-			await self._reply(message, "Peck Bot is answering another question. Try again in a moment.")
-			return
-
-		async with self.inference:
-			cooldown.add(author_id)
-			try:
-				answer = await self.ai.answer(prompt, default_timezone=self._stored_timezone(author_id))
-			except PeckAIError:
-				logger.warning("Airbot could not answer a Peck AI request")
-				answer = "Peck Bot couldn’t answer right now. Try again in a moment."
+		timezone = self._stored_timezone(author_id) if lookup is None or lookup.tool == "get_sqb_today" else None
+		if lookup:
+			answer = await self.ai.answer_lookup(lookup, default_timezone=timezone)
+		else:
+			async with self.inference:
+				try:
+					answer = await self.ai.answer(prompt, default_timezone=timezone)
+				except PeckAIError:
+					logger.warning("Airbot could not answer a Peck AI request")
+					answer = "Peck Bot couldn’t answer right now. Try again in a moment."
 		await self._reply(message, answer)
 
 
@@ -100,4 +95,5 @@ async def setup(bot: 'Bot'):
 	except ValueError:
 		logger.warning("Invalid Peck AI configuration. Discord AI replies are disabled.")
 		return
+	await ai.check_data_service()
 	await bot.add_cog(PeckAICog(bot, ai))

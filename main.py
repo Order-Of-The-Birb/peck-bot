@@ -56,7 +56,6 @@ def main():
 	async def on_load():
 		logger.info("Bot is getting ready...")
 		bot.status = discord.Status.do_not_disturb
-		bot.timeouts["ai"].run()
 		bot.timeouts["clip"].run()
 		bot.newsAPI=NewsAPI(bot)
 		for extension in EXTENSIONS:

@@ -13,6 +13,11 @@ from modules.peck_vehicles import get_vehicle_br
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
 
+@app.get("/healthz")
+async def health() -> dict:
+    return {"service": "peck-data"}
+
+
 @app.get("/v1/sqb/today")
 async def sqb_today(timezone: Annotated[str, Query(min_length=1, max_length=64)] = "UTC") -> dict:
     try:
