@@ -56,7 +56,6 @@ def main():
 	async def on_load():
 		logger.info("Bot is getting ready...")
 		bot.status = discord.Status.do_not_disturb
-		bot.timeouts["ai"].run()
 		bot.timeouts["clip"].run()
 		bot.newsAPI=NewsAPI(bot)
 		for extension in EXTENSIONS:
@@ -112,7 +111,12 @@ def main():
 	except Exception:
 		logger.exception("An exception occurred that caused the program to stall")
 	finally:
-		loop.close()
+		try:
+			loop.run_until_complete(bot.close())
+		except Exception:
+			logger.exception("An error occurred while closing the Discord bot")
+		finally:
+			loop.close()
 		exit(0)
 if __name__ == "__main__" or __package__ is None:
 	main()

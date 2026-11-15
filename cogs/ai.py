@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from contextlib import suppress
 from os import getenv
 from typing import TYPE_CHECKING
 
@@ -7,6 +8,7 @@ import discord
 from discord.ext import commands
 
 from modules.peck_ai import PeckAI, PeckAIError
+from modules.peck_lookup import match_lookup
 from utils.bot import ChannelIDs
 
 if TYPE_CHECKING:
@@ -16,6 +18,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 MAX_PROMPT_LENGTH = 2000
 MAX_REPLY_LENGTH = 2000
+INFERENCE_WAIT_SECONDS = 15
 
 
 class PeckAICog(commands.Cog):
@@ -23,6 +26,19 @@ class PeckAICog(commands.Cog):
 		self.bot = bot
 		self.ai = ai
 		self.inference = asyncio.Lock()
+		self._health_check: asyncio.Task[None] | None = None
+
+	async def cog_load(self):
+		self._health_check = asyncio.create_task(self.ai.check_data_service())
+
+	async def cog_unload(self):
+		try:
+			if self._health_check is not None:
+				self._health_check.cancel()
+				with suppress(asyncio.CancelledError):
+					await self._health_check
+		finally:
+			await self.ai.close()
 
 	def mention_prompt(self, message: discord.Message) -> str | None:
 		bot_user = self.bot.user
@@ -69,24 +85,27 @@ class PeckAICog(commands.Cog):
 			await self._reply(message, f"Please keep your question to {MAX_PROMPT_LENGTH:,} characters.")
 			return
 
+		lookup = match_lookup(prompt)
 		author_id = message.author.id
-		cooldown = self.bot.timeouts["ai"]
-		if cooldown.isTimedOut(author_id):
-			expires = cooldown.getExpireTime(author_id)
-			when = f" {discord.utils.format_dt(expires, style='R')}" if expires is not None else " later"
-			await self._reply(message, f"You’ve reached your Peck Bot limit. Try again{when}.")
-			return
-		if self.inference.locked():
-			await self._reply(message, "Peck Bot is answering another question. Try again in a moment.")
-			return
-
-		async with self.inference:
-			cooldown.add(author_id)
+		timezone = self._stored_timezone(author_id) if lookup is None or lookup.tool == "get_sqb_today" else None
+		if lookup:
+			answer = await self.ai.answer_lookup(lookup, default_timezone=timezone)
+		else:
+			if self.inference.locked():
+				await self._reply(message, f"Airbot is busy. I’ll wait up to {INFERENCE_WAIT_SECONDS} seconds for it to free up.")
 			try:
-				answer = await self.ai.answer(prompt, default_timezone=self._stored_timezone(author_id))
+				async with asyncio.timeout(INFERENCE_WAIT_SECONDS):
+					await self.inference.acquire()
+			except TimeoutError:
+				await self._reply(message, "Airbot is still busy. Try again in a moment.")
+				return
+			try:
+				answer = await self.ai.answer(prompt, default_timezone=timezone)
 			except PeckAIError:
 				logger.warning("Airbot could not answer a Peck AI request")
 				answer = "Peck Bot couldn’t answer right now. Try again in a moment."
+			finally:
+				self.inference.release()
 		await self._reply(message, answer)
 
 

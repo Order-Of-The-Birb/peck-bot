@@ -86,6 +86,7 @@ def _describe_day(now: datetime, zone: tzinfo, season: tuple[sqbBracket, ...]) -
         }
 
     windows = []
+    active_window = None
     next_window = None
     utc_day = day_start.date() - timedelta(days=1)
     last_day = max(day_end.date(), now.date() + timedelta(days=1))
@@ -96,6 +97,8 @@ def _describe_day(now: datetime, zone: tzinfo, season: tuple[sqbBracket, ...]) -
             if start < day_end and end > day_start:
                 window = describe_window(start, end)
                 windows.append(window)
+                if window["status"] == "active":
+                    active_window = window
             else:
                 window = None
             if next_window is None and start > now:
@@ -115,6 +118,7 @@ def _describe_day(now: datetime, zone: tzinfo, season: tuple[sqbBracket, ...]) -
         "timezone": str(zone),
         "as_of_utc": now.isoformat().replace("+00:00", "Z"),
         "windows": windows,
+        "active_window": active_window,
         "next_window": next_window,
         "max_br": shared_rating,
         "br_status": br_status,
@@ -125,5 +129,5 @@ def _describe_day(now: datetime, zone: tzinfo, season: tuple[sqbBracket, ...]) -
 async def get_sqb_today(timezone: str = "UTC") -> dict:
     """Return recurring play windows and published max BR for the requested local date."""
     zone = _resolve_timezone(timezone.strip())
-    now = datetime.now(UTC)
-    return _describe_day(now, zone, await _get_season())
+    season = await _get_season()
+    return _describe_day(datetime.now(UTC), zone, season)

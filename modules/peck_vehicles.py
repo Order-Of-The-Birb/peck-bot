@@ -1,16 +1,25 @@
 """Read vehicle battle ratings from the official War Thunder Wiki."""
 
+import asyncio
 import json
+import logging
 import re
+from dataclasses import dataclass
+from time import monotonic
 from unicodedata import normalize
 
 import aiohttp
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, SoupStrainer
 
 WIKI_URL = "https://wiki.warthunder.com"
 _TIMEOUT = aiohttp.ClientTimeout(total=5)
-_MAX_BODY = 2 * 1024 * 1024
-_UNIT_PATH = re.compile(r"/unit/([a-zA-Z0-9_-]{1,100})")
+_MAX_BODY = 3 * 1024 * 1024
+_CATALOG_TTL = 15 * 60
+_CATALOG_REFRESH_LEAD = 60
+_CATALOG_RETRY_DELAY = 60
+_CATALOG_PATHS = ("/aviation", "/ground", "/helicopters", "/ships", "/boats")
+_UNIT_LIST = re.compile(r"\s*window\.WT_UnitList\s*=\s*'(\[.*\])';\s*", re.DOTALL)
+_UNIT_ID = re.compile(r"[a-zA-Z0-9_-]{1,100}")
 _RATING = re.compile(r"[0-9]{1,2}\.[037]")
 _BATTLE_TYPES = {"air": "air", "tank": "ground", "ship": "naval"}
 _VEHICLE_TYPES = {
@@ -20,65 +29,217 @@ _VEHICLE_TYPES = {
 	"Bluewater Fleet": "naval",
 	"Coastal Fleet": "naval",
 }
+_COUNTRIES = {
+	"usa": ("USA", "US", "United States", "American"),
+	"germany": ("Germany", "German"),
+	"ussr": ("USSR", "Soviet", "Russia", "Russian"),
+	"britain": ("Great Britain", "Britain", "UK", "United Kingdom", "British"),
+	"japan": ("Japan", "Japanese"),
+	"china": ("China", "Chinese"),
+	"italy": ("Italy", "Italian"),
+	"france": ("France", "French"),
+	"sweden": ("Sweden", "Swedish"),
+	"israel": ("Israel", "Israeli"),
+}
+_COUNTRY_IDS = {alias.casefold(): country for country, aliases in _COUNTRIES.items() for alias in aliases}
+_COUNTRY_NAMES = "|".join(map(re.escape, _COUNTRY_IDS))
+_COUNTRY_PREFIX = re.compile(rf"^({_COUNTRY_NAMES})(?:['’]s)?\s+(.+)$", re.IGNORECASE)
+_COUNTRY_SUFFIX = re.compile(rf"^(.+?)(?:\s+(?:(?:from|in)\s+)?|\s*\()({_COUNTRY_NAMES})\)?$", re.IGNORECASE)
+# The regex matches both Turkish I variants to i, but casefold() alone does not.
+_COUNTRY_I_VARIANTS = str.maketrans("İı", "ii")
+_PREMIUM = re.compile(r"\bpremium\b", re.IGNORECASE)
+_HYPHENS = str.maketrans("‐‑‒–—−", "------")
+_RANKS = ("", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X")
+_logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class _Vehicle:
+	vehicle_id: str
+	name: str
+	country: str
+	rank: int
+	premium: bool
+
+	def as_result(self) -> dict[str, str]:
+		country = _COUNTRIES.get(self.country, (self.country.title(),))[0]
+		rank = _RANKS[self.rank] if 0 < self.rank < len(_RANKS) else str(self.rank)
+		description = f"{country} · Rank {rank}"
+		if self.premium:
+			description += " · Premium"
+		return {"vehicle": self.name, "vehicle_id": self.vehicle_id, "description": description}
+
+
+_catalog_cache: dict[str, tuple[float, tuple[_Vehicle, ...]]] = {}
+_catalog_lock = asyncio.Lock()
 
 
 class _WikiError(Exception):
 	pass
 
 
-async def _fetch(session: aiohttp.ClientSession, method: str, path: str, **kwargs) -> str:
-	async with session.request(method, f"{WIKI_URL}{path}", timeout=_TIMEOUT, allow_redirects=False, **kwargs) as response:
+async def _fetch(session: aiohttp.ClientSession, path: str) -> str:
+	async with session.get(f"{WIKI_URL}{path}", timeout=_TIMEOUT, allow_redirects=False) as response:
 		if response.status != 200:
-			raise _WikiError
+			raise _WikiError(f"{path} returned HTTP {response.status}")
 		body = bytearray()
 		async for chunk in response.content.iter_chunked(16 * 1024):
 			body.extend(chunk)
 			if len(body) > _MAX_BODY:
-				raise _WikiError
+				raise _WikiError(f"{path} exceeded the response size limit")
 		return body.decode("utf-8")
 
 
-def _match_key(value: str) -> str:
-	return "".join(char for char in normalize("NFKC", value).casefold() if char.isalnum())
-
-
-def _matches(search: str) -> list[dict[str, str]]:
+def _catalog_rows(html: str) -> tuple[_Vehicle, ...]:
+	# The Wiki embeds the vehicle list as JSON in the same script its filters use.
+	page = BeautifulSoup(html, "html.parser", parse_only=SoupStrainer(("script", "button")))
+	for script in page.find_all("script"):
+		if script.string and (match := _UNIT_LIST.fullmatch(script.string)):
+			break
+	else:
+		raise _WikiError("Vehicle catalog script is missing")
 	try:
-		payload = json.loads(search)
-		groups = payload.get("result") if isinstance(payload, dict) and payload.get("success") is True else None
+		rows = json.loads(match.group(1))
 	except (ValueError, RecursionError) as error:
-		raise _WikiError from error
-	if not isinstance(groups, list):
-		raise _WikiError
+		raise _WikiError("Vehicle catalog JSON is invalid") from error
+	if not isinstance(rows, list) or not rows:
+		raise _WikiError("Vehicle catalog is empty")
+	# Read the status codes used by the Wiki's filters on this page.
+	status_buttons = page.select("button[data-status-id]")
+	premium_buttons = [button for button in status_buttons if button.select_one(".unit-filter_status-block.premium")]
+	if len(premium_buttons) != 1:
+		raise _WikiError("Vehicle catalog is missing a unique premium status filter")
+	try:
+		status_codes = {int(button["data-status-id"]) for button in status_buttons}
+		premium_status = int(premium_buttons[0]["data-status-id"])
+	except ValueError as error:
+		raise _WikiError("Vehicle catalog has an invalid status filter") from error
+	vehicles = []
+	for row in rows:
+		if not isinstance(row, list) or len(row) < 6:
+			raise _WikiError("Vehicle catalog has an invalid row")
+		unit_id, name, country, rank, _, status = row[:6]
+		if (not isinstance(unit_id, str) or not _UNIT_ID.fullmatch(unit_id)
+				or not isinstance(name, str) or not 0 < len(name.strip()) <= 100
+				or not isinstance(country, str) or not country.isalpha()
+				or type(rank) is not int or type(status) is not int):
+			raise _WikiError("Vehicle catalog has invalid vehicle details")
+		if status not in status_codes:
+			raise _WikiError(f"Vehicle catalog has an unrecognized status code: {status}")
+		vehicles.append(_Vehicle(unit_id, " ".join(name.split()), country, rank, premium=status == premium_status))
+	return tuple(vehicles)
 
-	matches = {}
-	for group in groups:
-		if not isinstance(group, dict) or group.get("title") != "Vehicles":
+
+async def _load_catalog(session: aiohttp.ClientSession, path: str) -> tuple[_Vehicle, ...]:
+	html = await _fetch(session, path)
+	return await asyncio.to_thread(_catalog_rows, html)
+
+
+def _catalog_expires_at() -> float:
+	return min(_catalog_cache.get(path, (0, ()))[0] for path in _CATALOG_PATHS)
+
+
+async def _refresh_catalog(session: aiohttp.ClientSession, cutoff: float) -> list[tuple[str, BaseException]]:
+	# Callers hold _catalog_lock so only one refresh batch is in flight.
+	due = [path for path in _CATALOG_PATHS if _catalog_cache.get(path, (0, ()))[0] <= cutoff]
+	results = await asyncio.gather(*(_load_catalog(session, path) for path in due), return_exceptions=True)
+	expires_at = monotonic() + _CATALOG_TTL
+	failures = []
+	for path, result in zip(due, results):
+		if isinstance(result, BaseException):
+			failures.append((path, result))
+		else:
+			_catalog_cache[path] = (expires_at, result)
+	return failures
+
+
+async def maintain_vehicle_catalog(session: aiohttp.ClientSession) -> None:
+	"""Warm the catalog on service startup and refresh it before expiry."""
+	while True:
+		async with _catalog_lock:
+			failures = await _refresh_catalog(session, monotonic() + _CATALOG_REFRESH_LEAD)
+		for path, error in failures:
+			_logger.warning("Could not refresh the War Thunder Wiki vehicle catalog at %s: %s", path, error)
+		delay = _CATALOG_RETRY_DELAY if failures else _catalog_expires_at() - monotonic() - _CATALOG_REFRESH_LEAD
+		await asyncio.sleep(max(0, delay))
+
+
+async def _get_catalog(session: aiohttp.ClientSession, query: str) -> tuple[_Vehicle, ...]:
+	# Fresh catalog lookups can proceed while the background task refreshes it.
+	failures = []
+	if _catalog_expires_at() <= monotonic():
+		async with _catalog_lock:
+			failures = await _refresh_catalog(session, monotonic())
+	catalog = tuple(vehicle for path in _CATALOG_PATHS if path in _catalog_cache for vehicle in _catalog_cache[path][1])
+	# A partial catalog can establish a known internal ID, but cannot disambiguate a name.
+	if failures and not any(vehicle.vehicle_id.casefold() == query.casefold() for vehicle in catalog):
+		path, error = failures[0]
+		raise _WikiError(f"Could not load the vehicle catalog at {path}: {error}") from error
+	return catalog
+
+
+def _formal_name(value: str) -> str:
+	value = normalize("NFKC", value).translate(_HYPHENS).casefold()
+	return "".join(char for char in value if char.isalnum() or char in " .-_").strip()
+
+
+def _compact_name(value: str) -> str:
+	return "".join(char for char in value if char.isalnum())
+
+
+def _vehicle_query(value: str) -> tuple[str, str | None, bool]:
+	value, substitutions = _PREMIUM.subn(" ", value)
+	value = " ".join(re.sub(r"\(\s*\)", " ", value).split())
+	if match := _COUNTRY_SUFFIX.fullmatch(value):
+		name, country = match.groups()
+	elif match := _COUNTRY_PREFIX.fullmatch(value):
+		country, name = match.groups()
+	else:
+		return value, None, bool(substitutions)
+	country_key = country.translate(_COUNTRY_I_VARIANTS).casefold()
+	return name, _COUNTRY_IDS[country_key], bool(substitutions)
+
+
+def _candidates(vehicle: str, catalog: tuple[_Vehicle, ...]) -> list[_Vehicle]:
+	identifier = [entry for entry in catalog if entry.vehicle_id.casefold() == vehicle.casefold()]
+	if identifier:
+		return identifier
+	query, country, premium = _vehicle_query(vehicle)
+	formal = _formal_name(query)
+	key = _compact_name(formal)
+	if not key:
+		return []
+	# A numeric suffix is part of the model number, so F-2 must not match F-20A.
+	continuation = r"(?!\d)" if key[-1].isdigit() else ""
+	formal_prefix = re.compile(rf"{re.escape(formal)}{continuation}")
+	compact_prefix = re.compile(rf"{re.escape(key)}{continuation}")
+	word = re.compile(rf"(?<!\w){re.escape(formal)}{continuation}")
+	by_score: dict[int, dict[str, _Vehicle]] = {}
+	for entry in catalog:
+		if (country and entry.country != country) or (premium and not entry.premium):
 			continue
-		items = group.get("items")
-		if not isinstance(items, list):
-			raise _WikiError
-		for item in items:
-			if not isinstance(item, dict):
-				continue
-			path = item.get("link")
-			name = item.get("title")
-			match = _UNIT_PATH.fullmatch(path) if isinstance(path, str) else None
-			if match is None or not isinstance(name, str) or not 0 < len(name) <= 100:
-				continue
-			unit_id = match.group(1)
-			candidate = {"vehicle": " ".join(name.split()), "vehicle_id": unit_id}
-			subtitle = item.get("subtitle")
-			if isinstance(subtitle, str) and len(subtitle) <= 100:
-				candidate["description"] = " ".join(subtitle.split())
-			matches[unit_id] = candidate
-	return list(matches.values())
+		name = _formal_name(entry.name)
+		compact = _compact_name(name)
+		if name == formal:
+			score = 0
+		elif compact == key:
+			score = 1
+		elif formal_prefix.match(name):
+			score = 2
+		elif compact_prefix.match(compact):
+			score = 3
+		elif word.search(name):
+			score = 4
+		else:
+			continue
+		by_score.setdefault(score, {})[entry.vehicle_id] = entry
+	return list(by_score[min(by_score)].values()) if by_score else []
 
 
 def _battle_ratings(page: BeautifulSoup) -> dict[str, dict[str, str]]:
 	card = page.select_one(".game-unit_card-info .game-unit_br")
 	if card is None:
-		raise _WikiError
+		raise _WikiError("Vehicle page is missing the BR card")
 	category = page.select_one(".game-unit_title .game-unit_nation")
 	default_type = _VEHICLE_TYPES.get(category.get_text(strip=True), "standard") if category else "standard"
 	ratings = {}
@@ -94,7 +255,7 @@ def _battle_ratings(page: BeautifulSoup) -> dict[str, dict[str, str]]:
 		battle_type = _BATTLE_TYPES[panel["id"].removeprefix("unit-br-")] if panel else default_type
 		ratings.setdefault(battle_type, {})[mode] = value
 	if not ratings:
-		raise _WikiError
+		raise _WikiError("Vehicle BR card does not contain any ratings")
 	return ratings
 
 
@@ -103,39 +264,26 @@ async def get_vehicle_br(session: aiohttp.ClientSession, vehicle: str) -> dict:
 	if not isinstance(vehicle, str) or not 2 <= len(vehicle.strip()) <= 80:
 		return {"status": "invalid_query"}
 	vehicle = " ".join(vehicle.split())
-	key = _match_key(vehicle)
-	if not key:
+	if not _compact_name(_formal_name(vehicle)):
 		return {"status": "invalid_query"}
 
 	try:
-		# Wiki search uses the landing page's CSRF token and public session cookie.
-		page = BeautifulSoup(await _fetch(session, "GET", "/"), "html.parser")
-		param = page.select_one('meta[name="csrf-param"]')
-		token = page.select_one('meta[name="csrf-token"]')
-		if param is None or token is None or param.get("content") != "_csrf" or not token.get("content"):
-			raise _WikiError
-		search = await _fetch(
-			session, "POST", "/api/search",
-			data={"q": vehicle, "_csrf": token["content"]},
-			headers={"X-Requested-With": "XMLHttpRequest", "Origin": WIKI_URL, "Referer": f"{WIKI_URL}/"},
-		)
-		matches = _matches(search)
-		identifiers = [entry for entry in matches if entry["vehicle_id"].casefold() == vehicle.casefold()]
-		exact = [entry for entry in matches if _match_key(entry["vehicle"]) == key]
-		candidates = identifiers or exact or matches
+		candidates = _candidates(vehicle, await _get_catalog(session, vehicle))
 		if not candidates:
 			return {"status": "not_found"}
 		if len(candidates) != 1:
-			return {"status": "ambiguous", "candidates": candidates[:5]}
+			return {"status": "ambiguous", "candidates": [candidate.as_result() for candidate in candidates[:5]]}
 
 		selected = candidates[0]
-		path = f"/unit/{selected['vehicle_id']}"
-		stat_card = BeautifulSoup(await _fetch(session, "GET", path), "html.parser")
+		path = f"/unit/{selected.vehicle_id}"
+		html = await _fetch(session, path)
+		stat_card = await asyncio.to_thread(BeautifulSoup, html, "html.parser")
 		return {
 			"status": "ok",
-			**selected,
+			**selected.as_result(),
 			"battle_ratings": _battle_ratings(stat_card),
 			"source_url": f"{WIKI_URL}{path}",
 		}
-	except (aiohttp.ClientError, TimeoutError, UnicodeError, _WikiError):
+	except (aiohttp.ClientError, TimeoutError, UnicodeError, _WikiError) as error:
+		_logger.warning("Could not read War Thunder Wiki vehicle data: %s", error)
 		return {"status": "unavailable"}
