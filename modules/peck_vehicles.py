@@ -45,6 +45,8 @@ _COUNTRY_IDS = {alias.casefold(): country for country, aliases in _COUNTRIES.ite
 _COUNTRY_NAMES = "|".join(map(re.escape, _COUNTRY_IDS))
 _COUNTRY_PREFIX = re.compile(rf"^({_COUNTRY_NAMES})(?:['’]s)?\s+(.+)$", re.IGNORECASE)
 _COUNTRY_SUFFIX = re.compile(rf"^(.+?)(?:\s+(?:(?:from|in)\s+)?|\s*\()({_COUNTRY_NAMES})\)?$", re.IGNORECASE)
+# The regex matches both Turkish I variants to i, but casefold() alone does not.
+_COUNTRY_I_VARIANTS = str.maketrans("İı", "ii")
 _PREMIUM = re.compile(r"\bpremium\b", re.IGNORECASE)
 _HYPHENS = str.maketrans("‐‑‒–—−", "------")
 _RANKS = ("", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X")
@@ -194,7 +196,8 @@ def _vehicle_query(value: str) -> tuple[str, str | None, bool]:
 		country, name = match.groups()
 	else:
 		return value, None, bool(substitutions)
-	return name, _COUNTRY_IDS[country.casefold()], bool(substitutions)
+	country_key = country.translate(_COUNTRY_I_VARIANTS).casefold()
+	return name, _COUNTRY_IDS[country_key], bool(substitutions)
 
 
 def _candidates(vehicle: str, catalog: tuple[_Vehicle, ...]) -> list[_Vehicle]:

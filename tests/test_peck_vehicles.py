@@ -81,6 +81,19 @@ class VehicleLookupTests(IsolatedAsyncioTestCase):
         result = await peck_vehicles.get_vehicle_br(None, "F-2 premium from Germany")
         self.assertEqual(result, {"status": "not_found"})
 
+    async def test_country_qualifier_accepts_dotted_and_dotless_i(self):
+        self.pages["/ground"] = _catalog(
+            ["it_m24", "M24", "italy", 3, {}, 0],
+            ["us_m24", "M24", "usa", 3, {}, 0],
+        )
+        self.pages["/unit/it_m24"] = _ground_card("3.7")
+
+        for query in ("M24 from Italy", "M24 from \u0130taly", "\u0131taly's M24"):
+            with self.subTest(query=query):
+                result = await peck_vehicles.get_vehicle_br(None, query)
+                self.assertEqual(result["status"], "ok")
+                self.assertEqual(result["vehicle_id"], "it_m24")
+
     async def test_premium_status_follows_the_wiki_filter(self):
         self.pages["/aviation"] = _catalog(
             ["f_2a", "F-2A", "japan", 8, {}, 0],
