@@ -37,6 +37,7 @@ class DiscordLookupTests(unittest.IsolatedAsyncioTestCase):
             channelIDs={ChannelIDs.WTNEWS: 14}, db=SimpleNamespace(getByDID=lambda _: []),
         )
         self.ai = PeckAI("http://127.0.0.1:1234/v1", "unused")
+        self.addAsyncCleanup(self.ai.close)
         self.ai.answer = AsyncMock(return_value="General chat")
         self.cog = PeckAICog(self.bot, self.ai)
         self.message = SimpleNamespace(
@@ -52,7 +53,7 @@ class DiscordLookupTests(unittest.IsolatedAsyncioTestCase):
         return args.args[0]
 
     async def test_screenshot_sequence_calls_data_even_with_ai_busy(self):
-        async def source(_session, function, _timezone):
+        async def source(function, _timezone):
             if function["name"] == "get_sqb_today":
                 return {"max_br": 12.0, "next_window": {"discord_start": "<t:1794790800:F>"}}
             if "F-2 Premium from Japan" in function["arguments"]:
@@ -63,24 +64,22 @@ class DiscordLookupTests(unittest.IsolatedAsyncioTestCase):
         self.ai._call_tool = AsyncMock(side_effect=source)
         async with self.cog.inference:
             self.assertIn("12.0", await self.ask("what BR is SQB at currently?"))
+            self.assertIn("12.0", await self.ask("what's the current SQB BR?"))
             self.assertIn("12.0", await self.ask("Realistic Squadron Battles"))
             self.assertIn("Air: RB **13.0**", await self.ask("What BR is the F-2 Premium from Japan"))
             self.assertIn("Ground: RB **12.0**", await self.ask("what BR is the BMP-T"))
         self.ai.answer.assert_not_awaited()
-        self.assertEqual(self.ai._call_tool.await_count, 4)
+        self.assertEqual(self.ai._call_tool.await_count, 5)
 
     async def test_request_failure_is_not_vehicle_disambiguation(self):
         class OfflineSession:
             def get(self, *_args, **_kwargs):
                 raise aiohttp.ClientConnectionError
 
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, *_args):
+            async def close(self):
                 pass
 
-        with patch("modules.peck_ai.aiohttp.ClientSession", OfflineSession), self.assertLogs("modules.peck_ai", "WARNING") as logs:
+        with patch("modules.peck_ai.aiohttp.ClientSession", return_value=OfflineSession()), self.assertLogs("modules.peck_ai", "WARNING") as logs:
             self.assertEqual(await self.ask("what BR is the BMP-T"), DATA_API_ERROR)
         self.assertIn("/v1/vehicles/br", logs.output[0])
 
@@ -89,9 +88,37 @@ class DiscordLookupTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await self.ask("Hello!"), "General chat")
         self.assertEqual(self.ai.answer.await_count, 5)
 
-    async def test_chat_waits_for_airbot_instead_of_being_rejected_if_busy(self):
+    async def test_chat_acknowledges_waiting_and_answers_if_airbot_frees_up(self):
         async with self.cog.inference:
             pending = asyncio.create_task(self.ask("Hello!"))
             await asyncio.sleep(0)
-            self.message.reply.assert_not_awaited()
+            self.assertIn("Airbot is busy", self.message.reply.await_args.args[0])
+            self.ai.answer.assert_not_awaited()
         self.assertEqual(await pending, "General chat")
+
+    async def test_chat_stops_waiting_if_airbot_stays_busy(self):
+        with patch("cogs.ai.INFERENCE_WAIT_SECONDS", 0):
+            async with self.cog.inference:
+                self.assertIn("still busy", await asyncio.wait_for(self.ask("Hello!"), timeout=1))
+                self.assertTrue(self.cog.inference.locked())
+        self.ai.answer.assert_not_awaited()
+        self.assertEqual(await self.ask("Hello again!"), "General chat")
+
+    async def test_cog_load_does_not_wait_for_health_and_unload_cancels_it(self):
+        started = asyncio.Event()
+        cancelled = asyncio.Event()
+
+        async def check_data_service():
+            started.set()
+            try:
+                await asyncio.Future()
+            finally:
+                cancelled.set()
+
+        self.ai.check_data_service = check_data_service
+        await asyncio.wait_for(self.cog.cog_load(), timeout=1)
+        self.addAsyncCleanup(self.cog.cog_unload)
+        await asyncio.wait_for(started.wait(), timeout=1)
+        self.assertFalse(cancelled.is_set())
+        await self.cog.cog_unload()
+        self.assertTrue(cancelled.is_set())

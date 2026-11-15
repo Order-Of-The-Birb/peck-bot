@@ -15,6 +15,8 @@ WIKI_URL = "https://wiki.warthunder.com"
 _TIMEOUT = aiohttp.ClientTimeout(total=5)
 _MAX_BODY = 3 * 1024 * 1024
 _CATALOG_TTL = 15 * 60
+_CATALOG_REFRESH_LEAD = 60
+_CATALOG_RETRY_DELAY = 60
 _CATALOG_PATHS = ("/aviation", "/ground", "/helicopters", "/ships", "/boats")
 _UNIT_LIST = re.compile(r"\s*window\.WT_UnitList\s*=\s*'(\[.*\])';\s*", re.DOTALL)
 _UNIT_ID = re.compile(r"[a-zA-Z0-9_-]{1,100}")
@@ -88,7 +90,7 @@ async def _fetch(session: aiohttp.ClientSession, path: str) -> str:
 
 def _catalog_rows(html: str) -> tuple[_Vehicle, ...]:
 	# The Wiki embeds the vehicle list as JSON in the same script its filters use.
-	page = BeautifulSoup(html, "html.parser", parse_only=SoupStrainer("script"))
+	page = BeautifulSoup(html, "html.parser", parse_only=SoupStrainer(("script", "button")))
 	for script in page.find_all("script"):
 		if script.string and (match := _UNIT_LIST.fullmatch(script.string)):
 			break
@@ -100,6 +102,16 @@ def _catalog_rows(html: str) -> tuple[_Vehicle, ...]:
 		raise _WikiError("Vehicle catalog JSON is invalid") from error
 	if not isinstance(rows, list) or not rows:
 		raise _WikiError("Vehicle catalog is empty")
+	# Read the status codes used by the Wiki's filters on this page.
+	status_buttons = page.select("button[data-status-id]")
+	premium_buttons = [button for button in status_buttons if button.select_one(".unit-filter_status-block.premium")]
+	if len(premium_buttons) != 1:
+		raise _WikiError("Vehicle catalog is missing a unique premium status filter")
+	try:
+		status_codes = {int(button["data-status-id"]) for button in status_buttons}
+		premium_status = int(premium_buttons[0]["data-status-id"])
+	except ValueError as error:
+		raise _WikiError("Vehicle catalog has an invalid status filter") from error
 	vehicles = []
 	for row in rows:
 		if not isinstance(row, list) or len(row) < 6:
@@ -110,30 +122,58 @@ def _catalog_rows(html: str) -> tuple[_Vehicle, ...]:
 				or not isinstance(country, str) or not country.isalpha()
 				or type(rank) is not int or type(status) is not int):
 			raise _WikiError("Vehicle catalog has invalid vehicle details")
-		# The official catalog marks premium vehicles with status 1.
-		vehicles.append(_Vehicle(unit_id, " ".join(name.split()), country, rank, premium=status == 1))
+		if status not in status_codes:
+			raise _WikiError(f"Vehicle catalog has an unrecognized status code: {status}")
+		vehicles.append(_Vehicle(unit_id, " ".join(name.split()), country, rank, premium=status == premium_status))
 	return tuple(vehicles)
 
 
-async def _load_catalog(session: aiohttp.ClientSession, path: str) -> None:
+async def _load_catalog(session: aiohttp.ClientSession, path: str) -> tuple[_Vehicle, ...]:
 	html = await _fetch(session, path)
-	rows = await asyncio.to_thread(_catalog_rows, html)
-	_catalog_cache[path] = (monotonic() + _CATALOG_TTL, rows)
+	return await asyncio.to_thread(_catalog_rows, html)
+
+
+def _catalog_expires_at() -> float:
+	return min(_catalog_cache.get(path, (0, ()))[0] for path in _CATALOG_PATHS)
+
+
+async def _refresh_catalog(session: aiohttp.ClientSession, cutoff: float) -> list[tuple[str, BaseException]]:
+	# Callers hold _catalog_lock so only one refresh batch is in flight.
+	due = [path for path in _CATALOG_PATHS if _catalog_cache.get(path, (0, ()))[0] <= cutoff]
+	results = await asyncio.gather(*(_load_catalog(session, path) for path in due), return_exceptions=True)
+	expires_at = monotonic() + _CATALOG_TTL
+	failures = []
+	for path, result in zip(due, results):
+		if isinstance(result, BaseException):
+			failures.append((path, result))
+		else:
+			_catalog_cache[path] = (expires_at, result)
+	return failures
+
+
+async def maintain_vehicle_catalog(session: aiohttp.ClientSession) -> None:
+	"""Warm the catalog on service startup and refresh it before expiry."""
+	while True:
+		async with _catalog_lock:
+			failures = await _refresh_catalog(session, monotonic() + _CATALOG_REFRESH_LEAD)
+		for path, error in failures:
+			_logger.warning("Could not refresh the War Thunder Wiki vehicle catalog at %s: %s", path, error)
+		delay = _CATALOG_RETRY_DELAY if failures else _catalog_expires_at() - monotonic() - _CATALOG_REFRESH_LEAD
+		await asyncio.sleep(max(0, delay))
 
 
 async def _get_catalog(session: aiohttp.ClientSession, query: str) -> tuple[_Vehicle, ...]:
-	async with _catalog_lock:
-		now = monotonic()
-		expired = [path for path in _CATALOG_PATHS if _catalog_cache.get(path, (0, ()))[0] <= now]
-		results = await asyncio.gather(*(_load_catalog(session, path) for path in expired), return_exceptions=True)
-		catalog = tuple(vehicle for path in _CATALOG_PATHS if path in _catalog_cache for vehicle in _catalog_cache[path][1])
-		for path, result in zip(expired, results):
-			if isinstance(result, BaseException):
-				# A partial catalog can establish a known internal ID, but cannot disambiguate a name.
-				if any(vehicle.vehicle_id.casefold() == query.casefold() for vehicle in catalog):
-					return catalog
-				raise _WikiError(f"Could not load the vehicle catalog at {path}: {result}") from result
-		return catalog
+	# Fresh catalog lookups can proceed while the background task refreshes it.
+	failures = []
+	if _catalog_expires_at() <= monotonic():
+		async with _catalog_lock:
+			failures = await _refresh_catalog(session, monotonic())
+	catalog = tuple(vehicle for path in _CATALOG_PATHS if path in _catalog_cache for vehicle in _catalog_cache[path][1])
+	# A partial catalog can establish a known internal ID, but cannot disambiguate a name.
+	if failures and not any(vehicle.vehicle_id.casefold() == query.casefold() for vehicle in catalog):
+		path, error = failures[0]
+		raise _WikiError(f"Could not load the vehicle catalog at {path}: {error}") from error
+	return catalog
 
 
 def _formal_name(value: str) -> str:

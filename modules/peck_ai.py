@@ -120,15 +120,28 @@ class PeckAI:
         self._chat_url = f"{_base_url(base_url)}/chat/completions"
         self._data_url = _base_url(data_api_url or getenv("PECK_DATA_API_URL") or "http://127.0.0.1:5001")
         self._model = model
+        self._session: aiohttp.ClientSession | None = None
+        self._closed = False
+
+    def _get_session(self) -> aiohttp.ClientSession:
+        if self._closed:
+            raise aiohttp.ClientConnectionError("Peck AI is closed.")
+        if self._session is None:
+            self._session = aiohttp.ClientSession(cookie_jar=aiohttp.DummyCookieJar())
+        return self._session
+
+    async def close(self) -> None:
+        self._closed = True
+        if self._session is not None:
+            await self._session.close()
 
     async def check_data_service(self) -> None:
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    f"{self._data_url}/healthz", allow_redirects=False,
-                    timeout=aiohttp.ClientTimeout(total=3),
-                ) as response:
-                    payload = await _json_object(response, limit=1024)
+            async with self._get_session().get(
+                f"{self._data_url}/healthz", allow_redirects=False,
+                timeout=aiohttp.ClientTimeout(total=3),
+            ) as response:
+                payload = await _json_object(response, limit=1024)
             if payload.get("service") != "peck-data":
                 raise ValueError("Unexpected data service response")
         except (aiohttp.ClientError, TimeoutError, ValueError, RecursionError):
@@ -136,27 +149,26 @@ class PeckAI:
 
     async def answer(self, prompt: str, *, default_timezone: str | int | None = None) -> str:
         try:
-            async with asyncio.timeout(90), aiohttp.ClientSession() as session:
-                return await self._answer(session, prompt, default_timezone)
+            async with asyncio.timeout(90):
+                return await self._answer(prompt, default_timezone)
         except (aiohttp.ClientError, TimeoutError, ValueError, KeyError, IndexError, TypeError, AttributeError, RecursionError) as exc:
             raise PeckAIError("Airbot request failed.") from exc
 
     async def answer_lookup(self, lookup: Lookup, *, default_timezone: str | int | None = None) -> str:
         arguments = {"vehicle": lookup.vehicle} if lookup.vehicle is not None else {}
-        async with aiohttp.ClientSession() as session:
-            result = await self._call_tool(
-                session, {"name": lookup.tool, "arguments": json.dumps(arguments)}, default_timezone,
-            )
+        result = await self._call_tool(
+            {"name": lookup.tool, "arguments": json.dumps(arguments)}, default_timezone,
+        )
         try:
             return format_lookup(lookup, result)
         except (AttributeError, KeyError, TypeError):
             logger.warning("Unexpected response from Peck data service for %s", lookup.tool)
             return DATA_API_ERROR
 
-    async def _answer(self, session: aiohttp.ClientSession, prompt: str, default_timezone: str | int | None) -> str:
+    async def _answer(self, prompt: str, default_timezone: str | int | None) -> str:
         messages = [{"role": "system", "content": _SYSTEM}, {"role": "user", "content": prompt}]
         for round_number in range(4):
-            async with session.post(
+            async with self._get_session().post(
                 self._chat_url,
                 json={
                     "model": self._model,
@@ -202,7 +214,7 @@ class PeckAI:
                 "tool_calls": assistant_calls,
             })
             for call in assistant_calls:
-                result = await self._call_tool(session, call["function"], default_timezone)
+                result = await self._call_tool(call["function"], default_timezone)
                 if result.get("status") == "data_api_unavailable":
                     return DATA_API_ERROR
                 messages.append({
@@ -211,9 +223,7 @@ class PeckAI:
                 })
         raise PeckAIError("Airbot exceeded its tool budget.")
 
-    async def _call_tool(
-        self, session: aiohttp.ClientSession, function: dict, default_timezone: str | int | None,
-    ) -> dict:
+    async def _call_tool(self, function: dict, default_timezone: str | int | None) -> dict:
         try:
             arguments = json.loads(function["arguments"])
         except ValueError:
@@ -246,7 +256,7 @@ class PeckAI:
             return {"status": "unknown_tool"}
 
         try:
-            async with session.get(
+            async with self._get_session().get(
                 self._data_url + path, params=params, allow_redirects=False,
                 timeout=aiohttp.ClientTimeout(total=18, connect=3),
             ) as response:

@@ -13,7 +13,7 @@ _SQB_QUESTIONS = (
     re.compile(_SQB, re.IGNORECASE),
     re.compile(
         rf"(?:what (?:br|battle rating|tier|br cap) is (?:the )?{_SQB}"
-        rf"|what is (?:the )?(?:current )?{_SQB} (?:br|battle rating|tier|br cap)"
+        rf"|what(?:'s| is) (?:the )?(?:current )?{_SQB} (?:br|battle rating|tier|br cap)"
         rf"|what {_SQB} (?:br|battle rating|tier|br cap) is)"
         r"(?: at)?(?: (?:currently|right now|today))?(?: at)?",
         re.IGNORECASE,

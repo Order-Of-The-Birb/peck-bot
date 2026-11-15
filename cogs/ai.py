@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from contextlib import suppress
 from os import getenv
 from typing import TYPE_CHECKING
 
@@ -17,6 +18,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 MAX_PROMPT_LENGTH = 2000
 MAX_REPLY_LENGTH = 2000
+INFERENCE_WAIT_SECONDS = 15
 
 
 class PeckAICog(commands.Cog):
@@ -24,6 +26,19 @@ class PeckAICog(commands.Cog):
 		self.bot = bot
 		self.ai = ai
 		self.inference = asyncio.Lock()
+		self._health_check: asyncio.Task[None] | None = None
+
+	async def cog_load(self):
+		self._health_check = asyncio.create_task(self.ai.check_data_service())
+
+	async def cog_unload(self):
+		try:
+			if self._health_check is not None:
+				self._health_check.cancel()
+				with suppress(asyncio.CancelledError):
+					await self._health_check
+		finally:
+			await self.ai.close()
 
 	def mention_prompt(self, message: discord.Message) -> str | None:
 		bot_user = self.bot.user
@@ -76,12 +91,21 @@ class PeckAICog(commands.Cog):
 		if lookup:
 			answer = await self.ai.answer_lookup(lookup, default_timezone=timezone)
 		else:
-			async with self.inference:
-				try:
-					answer = await self.ai.answer(prompt, default_timezone=timezone)
-				except PeckAIError:
-					logger.warning("Airbot could not answer a Peck AI request")
-					answer = "Peck Bot couldn’t answer right now. Try again in a moment."
+			if self.inference.locked():
+				await self._reply(message, f"Airbot is busy. I’ll wait up to {INFERENCE_WAIT_SECONDS} seconds for it to free up.")
+			try:
+				async with asyncio.timeout(INFERENCE_WAIT_SECONDS):
+					await self.inference.acquire()
+			except TimeoutError:
+				await self._reply(message, "Airbot is still busy. Try again in a moment.")
+				return
+			try:
+				answer = await self.ai.answer(prompt, default_timezone=timezone)
+			except PeckAIError:
+				logger.warning("Airbot could not answer a Peck AI request")
+				answer = "Peck Bot couldn’t answer right now. Try again in a moment."
+			finally:
+				self.inference.release()
 		await self._reply(message, answer)
 
 
@@ -95,5 +119,4 @@ async def setup(bot: 'Bot'):
 	except ValueError:
 		logger.warning("Invalid Peck AI configuration. Discord AI replies are disabled.")
 		return
-	await ai.check_data_service()
 	await bot.add_cog(PeckAICog(bot, ai))

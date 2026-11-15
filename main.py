@@ -111,7 +111,12 @@ def main():
 	except Exception:
 		logger.exception("An exception occurred that caused the program to stall")
 	finally:
-		loop.close()
+		try:
+			loop.run_until_complete(bot.close())
+		except Exception:
+			logger.exception("An error occurred while closing the Discord bot")
+		finally:
+			loop.close()
 		exit(0)
 if __name__ == "__main__" or __package__ is None:
 	main()
